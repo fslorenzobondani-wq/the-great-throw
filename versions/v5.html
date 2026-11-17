@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>The Great Throw</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; touch-action: none; }
+  #stage { position: absolute; inset: 0; margin: auto; aspect-ratio: 4 / 3; max-width: 100vw; max-height: 100vh; overflow: hidden; background: #000; border-radius: 2.5% / 3.3%; }
+  #live { position: absolute; inset: -8%; width: 116%; height: 116%; border: 0; pointer-events: none; display: none;
+          filter: saturate(1.5) contrast(1.2) brightness(.92); }
+  #screen { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; }
+  #fx { position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+        background:
+          repeating-linear-gradient(0deg, rgba(0,0,0,.25) 0 1px, transparent 1px 3px),
+          radial-gradient(ellipse at center, transparent 58%, rgba(0,0,0,.7) 100%);
+        box-shadow: inset 0 0 60px rgba(120,200,255,.12); z-index: 6; }
+  #qr { position: absolute; right: 2%; bottom: 9%; width: 16%; background: #fff; padding: .8%; display: none; image-rendering: pixelated; z-index: 4; }
+  #qr img { width: 100%; display: block; }
+
+  /* ---- early-2000s media player, docked in the taskbar ---- */
+  #player { position: absolute; bottom: 0; right: 12.5%; width: 26%; height: 5.83%; z-index: 5;
+            display: flex; align-items: center; gap: 3%; padding: 0 1%; box-sizing: border-box;
+            background: linear-gradient(180deg, #3c7be0, #1f4fb8); border-left: 2px solid #0a246a; border-right: 2px solid #0a246a; }
+  #player button { flex: 0 0 auto; height: 78%; aspect-ratio: 1; border-radius: 50%; border: 1px solid #0b1a3a; padding: 0; cursor: pointer;
+                   background: radial-gradient(circle at 35% 30%, #ffffff, #b8c8e8 45%, #5d6f99); display: grid; place-items: center; }
+  #player button.big { background: radial-gradient(circle at 35% 30%, #e8fff0, #6fd68a 45%, #1d7a3a); }
+  #player button svg { width: 55%; height: 55%; fill: #102040; }
+  #player canvas.vis { flex: 1 1 auto; height: 70%; min-width: 0; background: #03140a; border: 1px inset #6b7894; image-rendering: pixelated; }
+  #player input[type=range] { flex: 0 0 22%; min-width: 0; accent-color: #9fd0ff; }
+  /* video pop-up above the taskbar (YouTube requires a visible player of at least 200x200 px) */
+  #video { position: absolute; right: 12.5%; bottom: 5.83%; width: max(200px, 24%); height: max(200px, 26%); z-index: 5;
+           background: linear-gradient(180deg, #e9eef6 0%, #b9c4d6 45%, #8e9bb3 100%); border: 1px solid #0b1a3a;
+           border-radius: 8px 8px 0 0; box-shadow: 4px -4px 0 rgba(0,0,0,.3); display: flex; flex-direction: column; }
+  #video .bar { height: 14px; flex: 0 0 auto; display: flex; align-items: center; gap: 4px; padding: 0 5px; border-radius: 7px 7px 0 0;
+                background: linear-gradient(180deg, #4f8df5, #1f4fb8); }
+  #video .bar i { display: block; width: 8px; height: 8px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff, #7ab0ff 40%, #1a3f9a); }
+  #video .bar i.min { margin-left: auto; cursor: pointer; background: radial-gradient(circle at 35% 35%, #fff, #ffd060 45%, #a06000); }
+  #video .screen { position: relative; flex: 1; margin: 4px; background: #000; border: 2px inset #6b7894; }
+  #video .screen > * { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #video.hidden { display: none; }
+
+  #pad { position: absolute; inset: 0; display: none; background: #111; }
+  #pad canvas { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <iframe id="live" allow="autoplay; encrypted-media"></iframe>
+  <canvas id="screen" width="320" height="240"></canvas>
+  <div id="qr"></div>
+  <div id="video" class="hidden">
+    <div class="bar"><i></i><i></i><i class="min" title="minimise (pauses the music)"></i></div>
+    <div class="screen"><div id="yt"></div></div>
+  </div>
+  <div id="player">
+    <button class="big" data-do="play" aria-label="play / pause"><svg viewBox="0 0 10 10"><path d="M2 1L9 5L2 9z"/></svg></button>
+    <button data-do="stop" aria-label="stop"><svg viewBox="0 0 10 10"><rect x="2" y="2" width="6" height="6"/></svg></button>
+    <canvas class="vis" width="64" height="12"></canvas>
+    <input type="range" min="0" max="100" value="70" aria-label="volume">
+  </div>
+  <div id="fx"></div>
+</div>
+<div id="pad"><canvas id="padc"></canvas></div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script>
+/* ============================================================
+   THE GREAT THROW · v5
+   Laptop = target screen (index.html) · Phone = controller (?role=phone&id=XXXX)
+   ============================================================ */
+
+// live: ID of a YouTube live stream of the square (the part after "watch?v=").
+// Empty = fallback city synced to the capital's real time and weather.
+const NATIONS = {
+  italy:      { live: '', lat: 41.90, lon: 12.50,  tz: 'Europe/Rome' },
+  spain:      { live: '', lat: 40.42, lon: -3.70,  tz: 'Europe/Madrid' },
+  france:     { live: '', lat: 48.86, lon: 2.35,   tz: 'Europe/Paris' },
+  germany:    { live: '', lat: 52.52, lon: 13.40,  tz: 'Europe/Berlin' },
+  usa:        { live: '', lat: 38.89, lon: -77.03, tz: 'America/New_York' },
+  russia:     { live: '', lat: 55.75, lon: 37.62,  tz: 'Europe/Moscow' },
+  china:      { live: '', lat: 39.90, lon: 116.40, tz: 'Asia/Shanghai' },
+  saudi:      { live: '', lat: 24.71, lon: 46.68,  tz: 'Asia/Riyadh' },
+  northkorea: { live: '', lat: 39.02, lon: 125.75, tz: 'Asia/Pyongyang' },
+};
+const COUNTRIES = Object.keys(NATIONS);
+
+// Beat X and these two react (see the brief)
+const REACTIONS = {
+  italy: ['france', 'spain'],      spain: ['italy', 'usa'],         france: ['germany', 'saudi'],
+  germany: ['russia', 'china'],    usa: ['china', 'northkorea'],    russia: ['germany', 'china'],
+  china: ['usa', 'northkorea'],    saudi: ['usa', 'france'],        northkorea: ['russia', 'china'],
+};
+
+const CONFIG = { litresPerFill: 50, flags: 7, sectors: 6, radius: 84 };
+const SONG = 'ayH9DmSloTs'; // YouTube video ID of the soundtrack (played by YouTube, not stored in this repo)
+
+let PRICES = { brent_usd: 65, countries: {
+  italy: { currency: 'EUR', litre: 1.75 }, spain: { currency: 'EUR', litre: 1.55 }, france: { currency: 'EUR', litre: 1.80 },
+  germany: { currency: 'EUR', litre: 1.75 }, usa: { currency: 'USD', litre: 0.85 }, russia: { currency: 'RUB', litre: 62 },
+  china: { currency: 'CNY', litre: 7.6 }, saudi: { currency: 'SAR', litre: 2.33 }, northkorea: null } };
+let RATES = { EUR: 1, USD: 1.08, RUB: 100, CNY: 7.8, SAR: 4.05 };
+
+/* ============================================================
+   MEDIA PLAYER (YouTube IFrame API — no audio file in the repository)
+   ============================================================ */
+const Player = (() => {
+  let yt = null, ready = false, wantsPlay = false, playing = false, started = false;
+  const ICON_PLAY = '<path d="M2 1L9 5L2 9z"/>', ICON_PAUSE = '<rect x="2" y="1.5" width="2.2" height="7"/><rect x="5.8" y="1.5" width="2.2" height="7"/>';
+  const $ = s => document.querySelector(s);
+  function icon() { $('#player [data-do=play] svg').innerHTML = playing ? ICON_PAUSE : ICON_PLAY; }
+  function showVideo(on) { $('#video').classList.toggle('hidden', !on); }
+  function init() {
+    window.onYouTubeIframeAPIReady = () => {
+      yt = new YT.Player('yt', {
+        videoId: SONG,
+        playerVars: { controls: 0, disablekb: 1, playsinline: 1, loop: 1, playlist: SONG, rel: 0, modestbranding: 1, iv_load_policy: 3 },
+        events: {
+          onReady: () => { ready = true; yt.setVolume(70); if (wantsPlay) yt.playVideo(); },
+          onStateChange: e => { playing = e.data === 1; icon(); },
+          onError: e => console.warn('This video cannot be embedded (code ' + e.data + ')'),
+        },
+      });
+    };
+    const s = document.createElement('script'); s.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(s);
+    ['#player', '#video'].forEach(id => $(id).addEventListener('pointerdown', e => e.stopPropagation()));
+    $('#player [data-do=play]').onclick = () => playing ? pause() : play();
+    $('#player [data-do=stop]').onclick = () => { if (ready) yt.stopVideo(); playing = false; icon(); showVideo(false); };
+    $('#player input').oninput = e => { if (ready) yt.setVolume(+e.target.value); };
+    $('#video .min').onclick = () => pause();
+    // bar visualiser (animated: YouTube does not expose the audio itself)
+    const vc = $('#player canvas.vis'), vg = vc.getContext('2d'), h = new Array(16).fill(0);
+    (function draw(t) {
+      vg.fillStyle = '#03140a'; vg.fillRect(0, 0, 64, 12);
+      for (let i = 0; i < 16; i++) {
+        const target = playing ? Math.abs(Math.sin(t / 180 + i * 1.7) * Math.sin(t / 430 + i * .6)) * 11 + Math.random() * 2 : 0;
+        h[i] += (target - h[i]) * .35;
+        for (let y = 0; y < Math.round(h[i]); y++) { vg.fillStyle = y > 8 ? '#ff4040' : y > 5 ? '#ffe040' : '#40ff70'; vg.fillRect(i * 4, 11 - y, 3, 1); }
+      }
+      requestAnimationFrame(draw);
+    })(0);
+  }
+  function play() { started = true; showVideo(true); if (ready) yt.playVideo(); else wantsPlay = true; }
+  function pause() { if (ready) yt.pauseVideo(); wantsPlay = false; showVideo(false); }
+  return { init, play, pause, get started() { return started; } };
+})();
+
+const role = new URLSearchParams(location.search).get('role');
+if (role === 'phone') startPhone(); else startTarget();
+
+/* ============================================================
+   FLAGS (pixel art, no text)
+   ============================================================ */
+function flag(g, id, x, y, w, h) {
+  x = Math.round(x); y = Math.round(y); w = Math.max(3, Math.round(w)); h = Math.max(2, Math.round(h));
+  const v = c => c.forEach((col, i) => { g.fillStyle = col; g.fillRect(x + Math.floor(i * w / c.length), y, Math.ceil(w / c.length), h); });
+  const o = c => c.forEach((col, i) => { g.fillStyle = col; g.fillRect(x, y + Math.floor(i * h / c.length), w, Math.ceil(h / c.length)); });
+  const px = (fx, fy, fw, fh, col) => { g.fillStyle = col; g.fillRect(x + Math.round(fx * w), y + Math.round(fy * h), Math.max(1, Math.round(fw * w)), Math.max(1, Math.round(fh * h))); };
+  switch (id) {
+    case 'italy': v(['#009246', '#f1f2f1', '#ce2b37']); break;
+    case 'france': v(['#0055a4', '#f1f2f1', '#ef4135']); break;
+    case 'germany': o(['#111', '#dd0000', '#ffce00']); break;
+    case 'russia': o(['#f1f2f1', '#0039a6', '#d52b1e']); break;
+    case 'spain': o(['#aa151b', '#f1bf00', '#f1bf00', '#aa151b']); break;
+    case 'usa':
+      for (let i = 0; i < 7; i++) { g.fillStyle = i % 2 ? '#f1f2f1' : '#b22234'; g.fillRect(x, y + Math.floor(i * h / 7), w, Math.ceil(h / 7)); }
+      px(0, 0, .42, .55, '#3c3b6e'); break;
+    case 'china': g.fillStyle = '#de2910'; g.fillRect(x, y, w, h); px(.1, .15, .16, .24, '#ffde00'); break;
+    case 'saudi': g.fillStyle = '#006c35'; g.fillRect(x, y, w, h); px(.2, .62, .6, .08, '#f1f2f1'); px(.25, .3, .5, .12, '#f1f2f1'); break;
+    case 'northkorea': o(['#024fa2', '#f1f2f1', '#be0000', '#be0000', '#f1f2f1', '#024fa2']); px(.22, .3, .2, .4, '#f1f2f1'); px(.26, .37, .12, .26, '#be0000'); break;
+  }
+}
+
+/* ============================================================
+   LAPTOP · TARGET SCREEN
+   ============================================================ */
+function startTarget() {
+  Player.init();
+  const cv = document.getElementById('screen'), g = cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  const W = 320, H = 240, CX = 160, CY = 116;
+  const WIN = { x: 44, y: 8, w: 232, h: 212 };
+
+  const S = {
+    scene: 'title', t: 0, sel: 0, me: null, rival: null,
+    wheel: 0, speed: .7, flights: [], planted: [], left: 0, influence: 0,
+    crash: null, weather: {}, phone: false, world: load(),
+  };
+  function load() { try { return JSON.parse(localStorage.getItem('gt-world')) || { conquests: {}, reacting: [] }; } catch (e) { return { conquests: {}, reacting: [] }; } }
+  function save() { try { localStorage.setItem('gt-world', JSON.stringify(S.world)); } catch (e) {} }
+
+  // --- sprites + collision masks
+  const SPR = {};
+  COUNTRIES.forEach(id => {
+    const im = new Image(); SPR[id] = { im, ok: false, mask: null };
+    im.onload = () => {
+      SPR[id].ok = true;
+      try { const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; const cg = c.getContext('2d'); cg.drawImage(im, 0, 0); SPR[id].mask = cg.getImageData(0, 0, im.width, im.height); }
+      catch (e) { SPR[id].mask = null; } // opened as a local file: approximate collision
+    };
+    im.src = 'img/' + id + '.png';
+  });
+
+  // --- real-world data
+  fetch('data/prices.json').then(r => r.json()).then(d => PRICES = d).catch(() => {});
+  fetch('https://open.er-api.com/v6/latest/EUR').then(r => r.json()).then(d => { if (d && d.rates) RATES = d.rates; }).catch(() => {});
+  COUNTRIES.forEach(id => {
+    const n = NATIONS[id];
+    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${n.lat}&longitude=${n.lon}&current=cloud_cover,precipitation`)
+      .then(r => r.json()).then(d => { if (d.current) S.weather[id] = { clouds: d.current.cloud_cover, rain: d.current.precipitation }; }).catch(() => {});
+  });
+  const fillCost = id => { const p = PRICES.countries[id]; if (!p) return null; return p.litre * CONFIG.litresPerFill / (RATES[p.currency] || 1); };
+  const clock = (id, withMinutes) => {
+    const f = new Intl.DateTimeFormat('en-GB', { timeZone: NATIONS[id].tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+    return withMinutes ? f : Number(f.slice(0, 2)) % 24;
+  };
+
+  // --- live camera of the square
+  let currentLive = null;
+  function live(id) {
+    const f = document.getElementById('live'), v = id && NATIONS[id].live;
+    if (v === currentLive) return; currentLive = v;
+    if (v) { f.src = `https://www.youtube.com/embed/${v}?autoplay=1&mute=1&controls=0&playsinline=1&loop=1`; f.style.display = 'block'; }
+    else { f.src = 'about:blank'; f.style.display = 'none'; }
+  }
+
+  // --- phone controller (PeerJS)
+  const code = String(Math.floor(1000 + Math.random() * 9000));
+  try {
+    const peer = new Peer('greatthrow-' + code);
+    peer.on('open', () => {
+      const url = location.origin + location.pathname + '?role=phone&id=' + code;
+      const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+      document.getElementById('qr').innerHTML = qr.createImgTag(4, 0); updateQR(); console.log('Phone:', url);
+    });
+    peer.on('connection', conn => {
+      conn.on('open', () => { S.phone = true; updateQR(); });
+      conn.on('data', d => {
+        if (d.type === 'tap') press();
+        if (d.type === 'throw' && S.scene === 'duel') throwFlag(CX + d.ax * 100, CY + 95 - d.ay * 190);
+        if (d.type === 'pick') move(d.dir);
+      });
+      conn.on('close', () => { S.phone = false; updateQR(); });
+    });
+  } catch (e) { console.warn('PeerJS unavailable: single-player mode'); }
+  function updateQR() { const b = document.getElementById('qr'); b.style.display = (S.scene === 'title' && !S.phone && b.innerHTML) ? 'block' : 'none'; }
+
+  // --- laptop input
+  const pos = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
+  cv.addEventListener('pointerdown', e => {
+    const p = pos(e);
+    if (S.scene === 'duel') return throwFlag(p.x, p.y);
+    if (S.scene === 'pickMe' || S.scene === 'pickRival') {
+      const i = Math.floor((p.x - 8) / 34);
+      if (i >= 0 && i < 9 && p.y > 60 && p.y < 200) { if (i === S.sel) press(); else S.sel = i; return; }
+    }
+    press();
+  });
+  addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight') move(1);
+    if (e.key === 'ArrowLeft') move(-1);
+    if (e.key === 'Enter' || e.key === ' ') press();
+  });
+  function move(d) { if (S.scene === 'pickMe' || S.scene === 'pickRival') S.sel = (S.sel + d + 9) % 9; }
+
+  function go(sc) { S.scene = sc; S.t = 0; updateQR(); if (sc === 'crash') Player.pause(); }
+  function press() {
+    const sc = S.scene;
+    if (sc === 'title') { Player.play(); S.sel = 0; go('pickMe'); }
+    else if (sc === 'pickMe') { S.me = COUNTRIES[S.sel]; S.sel = S.world.reacting.length ? COUNTRIES.indexOf(S.world.reacting[0]) : 0; go('pickRival'); }
+    else if (sc === 'pickRival') { if (COUNTRIES[S.sel] === S.me) return; S.rival = COUNTRIES[S.sel]; go('pumps'); }
+    else if (sc === 'pumps' && S.t > 1) duel();
+    else if (sc === 'crash' && S.t > 1.2) duel();
+    else if (sc === 'win' && S.t > 1.2) go(Object.keys(S.world.conquests).length >= 8 ? 'ending' : 'pickRival');
+    else if (sc === 'ending' && S.t > 2) { S.world = { conquests: {}, reacting: [] }; save(); go('title'); }
+  }
+
+  function duel() {
+    go('duel'); if (Player.started) Player.play();
+    S.flights = []; S.planted = []; S.left = CONFIG.flags; S.influence = 0; S.wheel = 0;
+    const cm = fillCost(S.me), cr = fillCost(S.rival);
+    // whoever pays more to fill up gets the advantage: the wheel starts still
+    S.hold = (cr === null || (cm !== null && cm >= cr)) ? 1.5 : 0;
+  }
+
+  // --- throwing
+  function throwFlag(tx, ty) {
+    if (S.left <= 0) return;
+    S.left--;
+    const weight = (PRICES.brent_usd - 60) * .35; // expensive oil = heavier flags
+    S.flights.push({ tx: tx + (Math.random() - .5) * 5, ty: ty + weight + (Math.random() - .5) * 5, t: 0 });
+  }
+  const leaderScale = () => { const s = SPR[S.rival]; return s && s.ok ? 118 / s.im.height : 1; };
+  function toWheel(x, y) { const dx = x - CX, dy = y - CY, c = Math.cos(-S.wheel), s = Math.sin(-S.wheel); return { x: dx * c - dy * s, y: dx * s + dy * c }; }
+  function toScreen(l) { const c = Math.cos(S.wheel), s = Math.sin(S.wheel); return { x: CX + l.x * c - l.y * s, y: CY + l.x * s + l.y * c }; }
+  function hitsLeader(l) {
+    const sp = SPR[S.rival]; if (!sp || !sp.ok) return Math.abs(l.x) < 25 && Math.abs(l.y) < 55;
+    const k = leaderScale(), sx = Math.floor(l.x / k + sp.im.width / 2), sy = Math.floor(l.y / k + sp.im.height / 2);
+    if (sx < 0 || sy < 0 || sx >= sp.im.width || sy >= sp.im.height) return false;
+    if (!sp.mask) return true;
+    // 2-pixel margin: grazing is skill, touching is a mistake
+    for (let oy = -2; oy <= 2; oy += 2) for (let ox = -2; ox <= 2; ox += 2) {
+      const xx = sx + Math.round(ox / k), yy = sy + Math.round(oy / k);
+      if (xx >= 0 && yy >= 0 && xx < sp.im.width && yy < sp.im.height && sp.mask.data[(yy * sp.im.width + xx) * 4 + 3] > 40) return true;
+    }
+    return false;
+  }
+  function sectors() {
+    const cov = new Array(CONFIG.sectors).fill(false);
+    S.planted.forEach(p => { const a = (Math.atan2(p.l.y, p.l.x) + Math.PI * 2) % (Math.PI * 2); cov[Math.floor(a / (Math.PI * 2) * CONFIG.sectors)] = true; });
+    return cov;
+  }
+
+  function update(dt) {
+    S.t += dt;
+    if (S.scene !== 'duel') return;
+    if (S.hold > 0) S.hold -= dt;
+    else { S.speed = .55 + Math.sin(S.t * .45) * .9; S.wheel += S.speed * dt; }
+    for (const f of S.flights) {
+      f.t += dt / .42;
+      if (f.t < 1 || f.done) continue;
+      f.done = true;
+      const l = toWheel(f.tx, f.ty);
+      if (hitsLeader(l)) {
+        S.crash = { x: f.tx, y: f.ty, cracks: Array.from({ length: 14 }, () => ({ a: Math.random() * Math.PI * 2, r: 30 + Math.random() * 140, k: Math.random() })) };
+        go('crash'); return;
+      }
+      const d = Math.hypot(l.x, l.y);
+      if (d <= CONFIG.radius) { S.planted.push({ l, t: 0 }); S.influence += Math.max(0, Math.round(100 - d)); }
+    }
+    S.flights = S.flights.filter(f => !f.done);
+    S.planted.forEach(p => p.t += dt);
+    if (sectors().every(Boolean)) {
+      S.world.conquests[S.rival] = S.me;
+      S.world.reacting = REACTIONS[S.rival].filter(id => !S.world.conquests[id] && id !== S.me);
+      save(); go('win');
+    } else if (S.left === 0 && !S.flights.length) { S.crash = null; go('crash'); }
+  }
+
+  /* ---------------- drawing ---------------- */
+  function background(id) {
+    live(id);
+    if (id && NATIONS[id].live) { g.clearRect(0, 0, W, H); return; }
+    const h = clock(id || 'italy'), m = S.weather[id] || { clouds: 30, rain: 0 };
+    const day = h >= 7 && h < 18, dusk = (h >= 17 && h < 20) || (h >= 6 && h < 8);
+    const a = day ? [70, 130, 220] : dusk ? [210, 110, 90] : [12, 16, 48], b = day ? [170, 210, 240] : dusk ? [245, 180, 110] : [40, 32, 80];
+    for (let y = 0; y < H; y += 3) { const k = y / H, d = ((y / 3) % 2) * .04; g.fillStyle = `rgb(${a.map((c, i) => Math.round(c + (b[i] - c) * Math.min(1, k + d))).join(',')})`; g.fillRect(0, y, W, 3); }
+    g.fillStyle = day ? 'rgba(245,245,255,.85)' : 'rgba(90,90,120,.85)';
+    for (let i = 0; i < Math.round(m.clouds / 12); i++) { const x = (i * 83 + S.t * 3) % (W + 80) - 40, y = 14 + (i * 29) % 70; g.fillRect(Math.round(x), y, 40, 9); g.fillRect(Math.round(x) + 10, y - 6, 22, 7); }
+    // generic low-poly city
+    g.fillStyle = day ? '#6d7f8f' : '#1c1a2e';
+    for (let i = 0; i < 18; i++) { const w = 12 + (i * 7) % 14, hh = 20 + (i * 37) % 46; g.fillRect(i * 19 - 4, 196 - hh, w, hh + 30); }
+    g.fillStyle = day ? '#59705a' : '#151a18'; g.fillRect(0, 196, W, 44);
+    if (!day) { g.fillStyle = '#ffd36b'; for (let i = 0; i < 40; i++) g.fillRect((i * 41) % W, 150 + (i * 17) % 44, 2, 2); }
+    if (m.rain > 0) { g.fillStyle = 'rgba(190,210,255,.55)'; for (let i = 0; i < 90; i++) g.fillRect((i * 53 + S.t * 30) % W, (i * 31 + S.t * 230) % H, 1, 4); }
+  }
+
+  function desktop(bgOf) {
+    background(bgOf);
+    // one icon per nation
+    COUNTRIES.forEach((id, i) => {
+      const x = 6, y = 6 + i * 23, cq = S.world.conquests[id], re = S.world.reacting.includes(id);
+      if (re && Math.floor(S.t * 3) % 2) { g.fillStyle = 'rgba(80,140,255,.6)'; g.fillRect(x - 2, y - 2, 30, 22); }
+      head(id, x + 4, y, 16);
+      flag(g, cq || id, x + 14, y + 10, 14, 9);
+      if (cq) { g.strokeStyle = '#ffe680'; g.lineWidth = 1; g.strokeRect(x + 13.5, y + 9.5, 15, 10); }
+    });
+    taskbar();
+  }
+  function taskbar() {
+    g.fillStyle = '#1f4fb8'; g.fillRect(0, 226, W, 14);
+    g.fillStyle = '#3c7be0'; g.fillRect(0, 226, W, 2);
+    g.fillStyle = '#2f9e3a'; g.fillRect(0, 226, 42, 14); g.fillStyle = '#4ccf58'; g.fillRect(0, 226, 42, 2);
+    if (S.me) flag(g, S.me, 8, 229, 13, 9); else { g.fillStyle = '#fff'; g.fillRect(10, 230, 4, 4); g.fillRect(15, 230, 4, 4); g.fillRect(10, 235, 4, 4); g.fillRect(15, 235, 4, 4); }
+    g.fillStyle = '#1a8fd8'; g.fillRect(W - 40, 226, 40, 14);
+    number(clock(S.rival || 'italy', true), W - 20, 236, '#fff');
+  }
+
+  function head(id, x, y, h) {
+    const sp = SPR[id]; if (!sp.ok) return;
+    const k = h * 2.6 / sp.im.height; // top of the sprite only: the head
+    g.save(); g.beginPath(); g.rect(x - 8, y, 16, h); g.clip();
+    g.drawImage(sp.im, x - sp.im.width * k / 2, y, sp.im.width * k, sp.im.height * k); g.restore();
+  }
+
+  function windowFrame(x, y, w, h, flagId) {
+    g.fillStyle = '#0a246a'; g.fillRect(x - 2, y - 2, w + 4, h + 4);
+    g.fillStyle = '#245edb'; g.fillRect(x, y, w, 12); g.fillStyle = '#3a7bf0'; g.fillRect(x, y, w, 3);
+    if (flagId) flag(g, flagId, x + 4, y + 2, 12, 8);
+    g.fillStyle = '#d9472b'; g.fillRect(x + w - 12, y + 2, 9, 8);
+    g.fillStyle = '#fff'; g.fillRect(x + w - 10, y + 4, 1, 1); g.fillRect(x + w - 9, y + 5, 3, 2); g.fillRect(x + w - 6, y + 4, 1, 1); g.fillRect(x + w - 10, y + 7, 1, 1); g.fillRect(x + w - 6, y + 7, 1, 1);
+    g.fillStyle = '#245edb'; g.fillRect(x, y + 12, 2, h - 12); g.fillRect(x + w - 2, y + 12, 2, h - 12); g.fillRect(x, y + h - 2, w, 2);
+  }
+
+  function wheel() {
+    const R = CONFIG.radius + 6;
+    g.save(); g.translate(CX, CY); g.rotate(S.wheel);
+    // concentric white and red rings
+    for (let i = 7; i >= 0; i--) { g.fillStyle = i % 2 ? '#f4efe6' : '#d32626'; g.beginPath(); g.arc(0, 0, R * (i + 1) / 8, 0, Math.PI * 2); g.fill(); }
+    // spokes so the rotation is visible
+    g.fillStyle = 'rgba(0,0,0,.08)';
+    for (let i = 0; i < 12; i += 2) { g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, R, i * Math.PI / 6, (i + 1) * Math.PI / 6); g.fill(); }
+    // rim with bulbs
+    g.strokeStyle = '#c8a14a'; g.lineWidth = 4; g.beginPath(); g.arc(0, 0, R, 0, Math.PI * 2); g.stroke();
+    for (let i = 0; i < 20; i++) { const a = i / 20 * Math.PI * 2; g.fillStyle = (Math.floor(S.t * 5) + i) % 2 ? '#fff3a0' : '#8a6a20'; g.fillRect(Math.round(Math.cos(a) * R) - 1, Math.round(Math.sin(a) * R) - 1, 3, 3); }
+    // the leader, strapped to the wheel
+    const sp = SPR[S.rival];
+    if (sp && sp.ok) { const k = leaderScale(), jx = (Math.random() - .5) * .6; g.drawImage(sp.im, -sp.im.width * k / 2 + jx, -sp.im.height * k / 2, sp.im.width * k, sp.im.height * k); }
+    g.restore();
+    g.fillStyle = '#4a3a20'; g.fillRect(CX - 3, CY + R - 2, 6, 34); // stand
+  }
+
+  function pole(x, y, id, scale, t) {
+    const s = scale || 1;
+    g.fillStyle = '#e8e0c8'; g.fillRect(Math.round(x), Math.round(y - 11 * s), 1, Math.round(12 * s));
+    flag(g, id, x + 1, y - 11 * s + Math.round(Math.sin((t || 0) * 6 + x) * 1), 12 * s, 8 * s);
+  }
+
+  function number(n, x, y, col) { g.fillStyle = col || '#ffe680'; g.font = '8px monospace'; g.textAlign = 'center'; g.fillText(String(n), x, y); }
+
+  function barrel(x, y, lvl) {
+    g.fillStyle = '#222'; g.fillRect(x - 8, y - 22, 16, 24);
+    g.fillStyle = '#1a1208'; g.fillRect(x - 6, y - 20 + Math.round(20 * (1 - lvl)), 12, Math.round(20 * lvl));
+    g.fillStyle = '#c8a14a'; g.fillRect(x - 8, y - 16, 16, 1); g.fillRect(x - 8, y - 6, 16, 1);
+  }
+
+  function pump(x, id, val, lit) {
+    g.fillStyle = lit && Math.floor(S.t * 4) % 2 ? '#ffe680' : '#c0392b'; g.fillRect(x - 22, 70, 44, 110);
+    g.fillStyle = '#111'; g.fillRect(x - 16, 80, 32, 22);
+    if (val === null) { g.fillStyle = '#000'; g.fillRect(x - 20, 86, 40, 10); } // censored data
+    else number(Math.round(val), x, 94);
+    g.fillStyle = '#333'; g.fillRect(x - 16, 110, 32, 60);
+    const h = val === null ? 0 : Math.min(58, Math.round(val / 160 * 58 * Math.min(1, S.t)));
+    g.fillStyle = '#d9a31f'; g.fillRect(x - 15, 169 - h, 30, h);
+    g.fillStyle = '#222'; g.fillRect(x + 22, 90, 6, 4); g.fillRect(x + 26, 90, 2, 50);
+    flag(g, id, x - 14, 48, 28, 18);
+  }
+
+  function groupShot(rivalPick) {
+    // PS1-cover group photo: cyan-to-violet gradient, low-poly sofa
+    live(null);
+    for (let y = 0; y < 226; y += 2) { const k = y / 226; g.fillStyle = `rgb(${Math.round(90 + 90 * k)},${Math.round(200 - 120 * k)},${Math.round(230 - 30 * k)})`; g.fillRect(0, y, W, 2); }
+    g.fillStyle = '#7b2f6e'; g.beginPath(); g.moveTo(4, 150); g.lineTo(316, 150); g.lineTo(306, 186); g.lineTo(14, 186); g.fill();
+    g.fillStyle = '#9a3f8a'; g.fillRect(10, 122, 300, 30);
+    COUNTRIES.forEach((id, i) => {
+      const sp = SPR[id], x = 8 + i * 34 + 17, sel = i === S.sel, cq = S.world.conquests[id];
+      const h = sel ? 84 : 70, y = 170 - h + (sel ? Math.round(Math.sin(S.t * 8) * 2) : 0);
+      const dim = rivalPick && id === S.me;
+      if (sel) { g.fillStyle = 'rgba(255,240,140,.5)'; g.fillRect(x - 17, y - 4, 34, h + 8); }
+      if (rivalPick && S.world.reacting.includes(id) && Math.floor(S.t * 3) % 2) { g.strokeStyle = '#3a7bf0'; g.lineWidth = 2; g.strokeRect(x - 16, y - 3, 32, h + 6); }
+      if (sp.ok) { const k = h / sp.im.height; g.globalAlpha = dim ? .3 : 1; g.drawImage(sp.im, x - sp.im.width * k / 2, y, sp.im.width * k, h); g.globalAlpha = 1; }
+      flag(g, id, x - 7, 192, 14, 9);
+      if (cq) flag(g, cq, x - 6, y - 12, 12, 8);
+    });
+    taskbar();
+  }
+
+  function crash() {
+    if (S.crash && S.t < .7) {
+      // the glass cracks
+      g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 1;
+      S.crash.cracks.forEach(c => { const r = c.r * Math.min(1, S.t * 3); g.beginPath(); g.moveTo(S.crash.x, S.crash.y); g.lineTo(S.crash.x + Math.cos(c.a) * r * .5 + c.k * 6, S.crash.y + Math.sin(c.a) * r * .5); g.lineTo(S.crash.x + Math.cos(c.a) * r, S.crash.y + Math.sin(c.a) * r); g.stroke(); });
+      g.fillStyle = '#0000aa'; g.beginPath(); g.arc(S.crash.x, S.crash.y, 6 + S.t * 30, 0, Math.PI * 2); g.fill();
+      return;
+    }
+    // blue screen: only numbers and blocks, no text
+    g.fillStyle = '#0000aa'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#aaaaaa'; g.fillRect(132, 40, 56, 9);
+    g.fillStyle = '#0000aa'; g.fillRect(138, 42, 44, 5);
+    for (let i = 0; i < 6; i++) { g.fillStyle = '#fff'; g.fillRect(40, 70 + i * 14, 120 + ((i * 53) % 110), 4); }
+    number('0x' + (S.rival || '').length.toString(16).padStart(8, '0').toUpperCase(), 160, 180, '#fff');
+    if (S.me) flag(g, S.me, 140, 196, 18, 12);
+    if (S.rival) flag(g, S.rival, 162, 196, 18, 12);
+    if (S.t > 1.2 && Math.floor(S.t * 2) % 2) { g.fillStyle = '#fff'; g.fillRect(156, 216, 8, 8); }
+  }
+
+  function draw() {
+    const sc = S.scene;
+    if (sc === 'title') {
+      desktop('italy');
+      windowFrame(58, 40, 170, 150, null);
+      g.fillStyle = 'rgba(244,239,230,.95)'; g.fillRect(60, 52, 166, 136);
+      for (let i = 4; i >= 0; i--) { g.fillStyle = i % 2 ? '#f4efe6' : '#d32626'; g.beginPath(); g.arc(143, 118, 12 + i * 11, 0, Math.PI * 2); g.fill(); }
+      pole(133, 112, 'italy', 1.4, S.t); pole(155, 128, 'usa', 1.4, S.t); pole(131, 140, 'china', 1.4, S.t);
+      if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#245edb'; g.beginPath(); g.moveTo(136, 172); g.lineTo(136, 186); g.lineTo(150, 179); g.fill(); }
+      return;
+    }
+    if (sc === 'pickMe' || sc === 'pickRival') {
+      groupShot(sc === 'pickRival');
+      if (sc === 'pickMe') flag(g, COUNTRIES[S.sel], 140, 18, 40, 27);
+      else if (S.me) { flag(g, S.me, 120, 22, 28, 19); g.fillStyle = '#fff'; g.fillRect(156, 30, 8, 3); flag(g, COUNTRIES[S.sel], 172, 22, 28, 19); }
+      return;
+    }
+    if (sc === 'pumps') {
+      desktop(S.rival); windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, S.rival);
+      g.fillStyle = 'rgba(10,20,60,.75)'; g.fillRect(WIN.x + 2, WIN.y + 12, WIN.w - 4, WIN.h - 14);
+      const a = fillCost(S.me), b = fillCost(S.rival);
+      pump(115, S.me, a, b === null || (a !== null && a >= b)); pump(205, S.rival, b, b !== null && (a === null || b > a));
+      barrel(160, 200, Math.min(1, PRICES.brent_usd / 120));
+      if (S.t > 1 && Math.floor(S.t * 2) % 2) { g.fillStyle = '#ffe680'; g.beginPath(); g.moveTo(154, 206); g.lineTo(154, 218); g.lineTo(166, 212); g.fill(); }
+      return;
+    }
+    if (sc === 'duel' || (sc === 'crash' && S.crash && S.t < .7)) {
+      desktop(S.rival);
+      windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, S.rival);
+      wheel();
+      S.planted.forEach(p => { const s = toScreen(p.l); pole(s.x, s.y, S.me, 1, p.t); });
+      S.flights.forEach(f => { const t = Math.min(1, f.t), x = CX + (f.tx - CX) * t, y = 250 + (f.ty - 250) * t - Math.sin(t * Math.PI) * 40; pole(x, y, S.me, 2.2 - t * 1.2, S.t); });
+      if (sc === 'duel') hud(); else crash();
+      return;
+    }
+    if (sc === 'crash') { crash(); return; }
+    if (sc === 'win') { desktop(S.rival); const s = Math.min(1, S.t * 1.5); flag(g, S.me, 160 - 60 * s, 118 - 40 * s, 120 * s, 80 * s); return; }
+    if (sc === 'ending') { live(null); for (let y = 0; y < 226; y += 20) for (let x = 0; x < W; x += 30) flag(g, S.me, x + ((y / 20) % 2) * 15 - 15, y, 28, 18); taskbar(); }
+  }
+
+  function hud() {
+    // flags left (bottom of the window)
+    for (let i = 0; i < CONFIG.flags; i++) { if (i < S.left) flag(g, S.me, WIN.x + 6 + i * 15, WIN.y + WIN.h - 14, 12, 8); else { g.fillStyle = 'rgba(0,0,0,.4)'; g.fillRect(WIN.x + 6 + i * 15, WIN.y + WIN.h - 14, 12, 8); } }
+    // ring sectors
+    sectors().forEach((ok, i) => {
+      const a0 = i / CONFIG.sectors * Math.PI * 2 + S.wheel, a1 = (i + 1) / CONFIG.sectors * Math.PI * 2 + S.wheel;
+      g.strokeStyle = ok ? 'rgba(255,230,90,.95)' : 'rgba(255,255,255,.25)'; g.lineWidth = 3;
+      g.beginPath(); g.arc(CX, CY, CONFIG.radius + 14, a0 + .06, a1 - .06); g.stroke();
+    });
+    number(S.influence, WIN.x + WIN.w - 20, WIN.y + WIN.h - 7);
+    barrel(WIN.x + WIN.w - 12, WIN.y + 40, Math.min(1, PRICES.brent_usd / 120));
+  }
+
+  let prev = performance.now();
+  (function loop(now) { const dt = Math.min(.05, ((now || prev) - prev) / 1000); prev = now || prev; update(dt); draw(); requestAnimationFrame(loop); })();
+}
+
+/* ============================================================
+   PHONE · CONTROLLER
+   ============================================================ */
+function startPhone() {
+  document.getElementById('stage').style.display = 'none';
+  const pad = document.getElementById('pad'); pad.style.display = 'block';
+  const cv = document.getElementById('padc'), g = cv.getContext('2d');
+  let conn = null, connected = false, start = null, country = 0, trail = 0;
+  const id = new URLSearchParams(location.search).get('id');
+  function size() { cv.width = 160; cv.height = Math.round(160 * innerHeight / innerWidth); g.imageSmoothingEnabled = false; }
+  size(); addEventListener('resize', size);
+  try { const peer = new Peer(); peer.on('open', () => { conn = peer.connect('greatthrow-' + id); conn.on('open', () => connected = true); conn.on('close', () => connected = false); }); } catch (e) {}
+  const send = d => { if (conn && connected) conn.send(d); };
+  cv.addEventListener('touchstart', e => { const t = e.touches[0]; start = { x: t.clientX, y: t.clientY }; e.preventDefault(); }, { passive: false });
+  cv.addEventListener('touchend', e => {
+    if (!start) return;
+    const t = e.changedTouches[0], dx = t.clientX - start.x, dy = t.clientY - start.y;
+    if (dy < -40) { send({ type: 'throw', ax: Math.max(-1, Math.min(1, dx / (innerWidth * .5))), ay: Math.max(0, Math.min(1, -dy / (innerHeight * .75))) }); trail = 1; }
+    else if (Math.abs(dx) > 40) { const dir = dx > 0 ? 1 : -1; country = (country + dir + 9) % 9; send({ type: 'pick', dir }); }
+    else send({ type: 'tap' });
+    start = null;
+  });
+  (function draw() {
+    const W = cv.width, H = cv.height;
+    g.fillStyle = '#111'; g.fillRect(0, 0, W, H);
+    g.fillStyle = connected ? '#3c3' : '#c33'; g.fillRect(W - 10, 6, 5, 5);
+    const y = H * .45 - trail * H * .4;
+    g.fillStyle = '#e8e0c8'; g.fillRect(W / 2 - 1, y, 2, 60);
+    flag(g, COUNTRIES[country], W / 2 + 1, y, 44, 30);
+    g.fillStyle = 'rgba(255,230,128,.5)'; g.beginPath(); g.moveTo(W / 2, H - 40); g.lineTo(W / 2 - 12, H - 24); g.lineTo(W / 2 + 12, H - 24); g.fill();
+    trail = Math.max(0, trail - .06);
+    requestAnimationFrame(draw);
+  })();
+}
+</script>
+</body>
+</html>
