@@ -12,9 +12,9 @@ No words in the game: only icons, flags, colours and numbers.
 - **Solo mode:** click on the wheel, or use the arrow keys and Enter.
 
 ## Real-world data
-- **Who starts:** whoever pays more to fill up a 50-litre tank (pump price × today's exchange rate) gets the advantage. North Korea has no official data: its pump is censored.
-- **Brent oil price:** sets how heavy the flags are.
+- **Who starts:** today's coin. Each currency is measured against gold since yesterday; the weaker coin gets the advantage (the wheel starts still). Same currency (the four euro countries) → a coin toss. North Korea has no free market rate: its coin is censored.
 - **Weather and local time** of each capital drive the fallback background.
+- **Soundtrack:** `audio/soundtrack.mp3`, with a real visualiser in the taskbar; on a crash the song slows down and dies like a jammed tape.
 
 ## Set up the live cams
 In `index.html`, each nation in `NATIONS` has `live: ''`. Paste the YouTube ID (the part after `watch?v=`) of a live cam of that square.
@@ -22,7 +22,7 @@ In `index.html`, each nation in `NATIONS` has `live: ''`. Paste the YouTube ID (
 ## Files
 - `index.html` — the whole game
 - `img/` — character sprites
-- `data/prices.json` — petrol prices (update weekly)
+- `audio/soundtrack.mp3` — the soundtrack
 - `process.md` — versions, decisions and dependency map
 - `versions/` — saved versions
 

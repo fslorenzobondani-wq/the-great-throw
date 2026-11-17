@@ -63,12 +63,15 @@ const REACTIONS = {
   china: ['usa', 'northkorea'],    saudi: ['usa', 'france'],        northkorea: ['russia', 'china'],
 };
 
-const CONFIG = { litresPerFill: 50, flags: 7, sectors: 6, radius: 84 };
-let PRICES = { brent_usd: 65, countries: {
-  italy: { currency: 'EUR', litre: 1.75 }, spain: { currency: 'EUR', litre: 1.55 }, france: { currency: 'EUR', litre: 1.80 },
-  germany: { currency: 'EUR', litre: 1.75 }, usa: { currency: 'USD', litre: 0.85 }, russia: { currency: 'RUB', litre: 62 },
-  china: { currency: 'CNY', litre: 7.6 }, saudi: { currency: 'SAR', litre: 2.33 }, northkorea: null } };
-let RATES = { EUR: 1, USD: 1.08, RUB: 100, CNY: 7.8, SAR: 4.05 };
+const CONFIG = { flags: 7, sectors: 6, radius: 84 };
+
+// Each nation's currency. The coin of the day = how much the currency moved against gold since yesterday.
+const CURRENCY = {
+  italy: 'eur', spain: 'eur', france: 'eur', germany: 'eur', usa: 'usd',
+  russia: 'rub', china: 'cny', saudi: 'sar', northkorea: null, // North Korea: no free market rate → censored coin
+};
+const SYMBOL = { eur: '€', usd: '$', rub: '₽', cny: '¥', sar: '﷼' };
+let GOLD = { eur: 0, usd: 0, rub: 0, cny: 0, sar: 0 }; // % change of gold priced in each currency (fallback: 0)
 
 /* ============================================================
    MUSIC (audio/soundtrack.mp3 + Web Audio for a real visualiser and the tape-stop effect)
@@ -161,14 +164,25 @@ function startTarget() {
   });
 
   // --- real-world data
-  fetch('data/prices.json').then(r => r.json()).then(d => PRICES = d).catch(() => {});
-  fetch('https://open.er-api.com/v6/latest/EUR').then(r => r.json()).then(d => { if (d && d.rates) RATES = d.rates; }).catch(() => {});
+  // gold today vs yesterday, priced in every currency (free currency-api on jsDelivr, no key)
+  const iso = d => d.toISOString().slice(0, 10);
+  const goldOn = date => fetch(`https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${date}/v1/currencies/xau.json`).then(r => r.json()).then(d => d.xau);
+  Promise.all([goldOn('latest'), goldOn(iso(new Date(Date.now() - 2 * 864e5)))]).then(([now, before]) => {
+    Object.keys(GOLD).forEach(c => { if (now[c] && before[c]) GOLD[c] = (now[c] / before[c] - 1) * 100; });
+  }).catch(() => {});
   COUNTRIES.forEach(id => {
     const n = NATIONS[id];
     fetch(`https://api.open-meteo.com/v1/forecast?latitude=${n.lat}&longitude=${n.lon}&current=cloud_cover,precipitation`)
       .then(r => r.json()).then(d => { if (d.current) S.weather[id] = { clouds: d.current.cloud_cover, rain: d.current.precipitation }; }).catch(() => {});
   });
-  const fillCost = id => { const p = PRICES.countries[id]; if (!p) return null; return p.litre * CONFIG.litresPerFill / (RATES[p.currency] || 1); };
+  // strength of a coin: if gold got more expensive in your currency, your coin got weaker
+  const strength = id => CURRENCY[id] ? -GOLD[CURRENCY[id]] : null;
+  // who gets the advantage: the weaker coin; same currency → toss a coin
+  function decide() {
+    const a = strength(S.me), b = strength(S.rival);
+    S.toss = a !== null && b !== null && CURRENCY[S.me] === CURRENCY[S.rival];
+    S.meFirst = S.toss ? Math.random() < .5 : (b === null ? true : (a === null ? false : a <= b));
+  }
   const clock = (id, withMinutes) => {
     const f = new Intl.DateTimeFormat('en-GB', { timeZone: NATIONS[id].tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
     return withMinutes ? f : Number(f.slice(0, 2)) % 24;
@@ -194,7 +208,7 @@ function startTarget() {
     });
     peer.on('connection', conn => {
       S.conn = conn;
-      conn.on('open', () => { S.phone = true; updateQR(); sendFlag(); if (S.scene === 'pair') go('pumps'); });
+      conn.on('open', () => { S.phone = true; updateQR(); sendFlag(); if (S.scene === 'pair') coins(); });
       conn.on('data', d => {
         if (d.type === 'tap') press();
         if (d.type === 'throw' && S.scene === 'duel') throwFlag(CX + d.ax * 100, CY + 95 - d.ay * 190);
@@ -230,28 +244,28 @@ function startTarget() {
     const sc = S.scene;
     if (sc === 'title') { Music.start(); S.sel = 0; go('pickMe'); }
     else if (sc === 'pickMe') { S.me = COUNTRIES[S.sel]; S.sel = S.world.reacting.length ? COUNTRIES.indexOf(S.world.reacting[0]) : 0; go('pickRival'); }
-    else if (sc === 'pickRival') { if (COUNTRIES[S.sel] === S.me) return; S.rival = COUNTRIES[S.sel]; go(S.phone ? 'pumps' : 'pair'); sendFlag(); }
-    else if (sc === 'pair') go('pumps'); // no phone: play solo with the mouse
-    else if (sc === 'pumps' && S.t > 1) duel();
+    else if (sc === 'pickRival') { if (COUNTRIES[S.sel] === S.me) return; S.rival = COUNTRIES[S.sel]; S.phone ? coins() : go('pair'); sendFlag(); }
+    else if (sc === 'pair') coins(); // no phone: play solo with the mouse
+    else if (sc === 'coins' && S.t > 2.2) duel();
     else if (sc === 'crash' && S.t > 1.2) duel();
     else if (sc === 'win' && S.t > 1.2) go(Object.keys(S.world.conquests).length >= 8 ? 'ending' : 'pickRival');
     else if (sc === 'ending' && S.t > 2) { S.world = { conquests: {}, reacting: [] }; save(); go('title'); }
   }
 
+  function coins() { decide(); go('coins'); }
+
   function duel() {
     go('duel'); Music.start();
     S.flights = []; S.planted = []; S.left = CONFIG.flags; S.influence = 0; S.wheel = 0;
-    const cm = fillCost(S.me), cr = fillCost(S.rival);
-    // whoever pays more to fill up gets the advantage: the wheel starts still
-    S.hold = (cr === null || (cm !== null && cm >= cr)) ? 1.5 : 0;
+    // the weaker coin gets the advantage: the wheel starts still
+    S.hold = S.meFirst ? 1.5 : 0;
   }
 
   // --- throwing
   function throwFlag(tx, ty) {
     if (S.left <= 0) return;
     S.left--;
-    const weight = (PRICES.brent_usd - 60) * .35; // expensive oil = heavier flags
-    S.flights.push({ tx: tx + (Math.random() - .5) * 5, ty: ty + weight + (Math.random() - .5) * 5, t: 0 });
+    S.flights.push({ tx: tx + (Math.random() - .5) * 5, ty: ty + (Math.random() - .5) * 5, t: 0 });
   }
   const leaderScale = () => { const s = SPR[S.rival]; return s && s.ok ? 118 / s.im.height : 1; };
   function toWheel(x, y) { const dx = x - CX, dy = y - CY, c = Math.cos(-S.wheel), s = Math.sin(-S.wheel); return { x: dx * c - dy * s, y: dx * s + dy * c }; }
@@ -385,22 +399,17 @@ function startTarget() {
 
   function number(n, x, y, col) { g.fillStyle = col || '#ffe680'; g.font = '8px monospace'; g.textAlign = 'center'; g.fillText(String(n), x, y); }
 
-  function barrel(x, y, lvl) {
-    g.fillStyle = '#222'; g.fillRect(x - 8, y - 22, 16, 24);
-    g.fillStyle = '#1a1208'; g.fillRect(x - 6, y - 20 + Math.round(20 * (1 - lvl)), 12, Math.round(20 * lvl));
-    g.fillStyle = '#c8a14a'; g.fillRect(x - 8, y - 16, 16, 1); g.fillRect(x - 8, y - 6, 16, 1);
-  }
-
-  function pump(x, id, val, lit) {
-    g.fillStyle = lit && Math.floor(S.t * 4) % 2 ? '#ffe680' : '#c0392b'; g.fillRect(x - 22, 70, 44, 110);
-    g.fillStyle = '#111'; g.fillRect(x - 16, 80, 32, 22);
-    if (val === null) { g.fillStyle = '#000'; g.fillRect(x - 20, 86, 40, 10); } // censored data
-    else number(Math.round(val), x, 94);
-    g.fillStyle = '#333'; g.fillRect(x - 16, 110, 32, 60);
-    const h = val === null ? 0 : Math.min(58, Math.round(val / 160 * 58 * Math.min(1, S.t)));
-    g.fillStyle = '#d9a31f'; g.fillRect(x - 15, 169 - h, 30, h);
-    g.fillStyle = '#222'; g.fillRect(x + 22, 90, 6, 4); g.fillRect(x + 26, 90, 2, 50);
-    flag(g, id, x - 14, 48, 28, 18);
+  // a big PS1-style coin: size follows today's move against gold
+  function coin(x, y, id, r, lit, spin) {
+    const sx = spin === undefined ? 1 : Math.abs(Math.cos(spin)); // flattening while it spins
+    g.save(); g.translate(x, y); g.scale(Math.max(.08, sx), 1);
+    g.fillStyle = lit && Math.floor(S.t * 4) % 2 ? '#fff3a0' : '#c99a2e'; g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#8a6418'; g.beginPath(); g.arc(0, 0, r - 3, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#e8c25a'; g.beginPath(); g.arc(-1, -1, r - 5, 0, Math.PI * 2); g.fill();
+    const c = CURRENCY[id];
+    if (!c) { g.fillStyle = '#000'; g.fillRect(-r + 2, -5, 2 * r - 4, 10); } // censored
+    else { g.fillStyle = '#7a5410'; g.font = `900 ${Math.round(r * 1.1)}px "Arial Black", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(SYMBOL[c], 0, 1); g.textBaseline = 'alphabetic'; }
+    g.restore();
   }
 
   function groupShot(rivalPick) {
@@ -445,9 +454,7 @@ function startTarget() {
     const sc = S.scene;
     if (sc === 'title') {
       desktop('italy');
-      // spinning wheel with a different leader every two seconds
-      S.rival = COUNTRIES[Math.floor(S.t / 2) % 9]; S.wheel = S.t * .8;
-      wheel();
+      globe();
       logo();
       if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#fff'; g.beginPath(); g.moveTo(153, 204); g.lineTo(153, 218); g.lineTo(167, 211); g.fill(); }
       return;
@@ -471,13 +478,23 @@ function startTarget() {
       else if (S.me) { flag(g, S.me, 120, 22, 28, 19); g.fillStyle = '#fff'; g.fillRect(156, 30, 8, 3); flag(g, COUNTRIES[S.sel], 172, 22, 28, 19); }
       return;
     }
-    if (sc === 'pumps') {
+    if (sc === 'coins') {
       desktop(S.rival); windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, S.rival);
-      g.fillStyle = 'rgba(10,20,60,.75)'; g.fillRect(WIN.x + 2, WIN.y + 12, WIN.w - 4, WIN.h - 14);
-      const a = fillCost(S.me), b = fillCost(S.rival);
-      pump(115, S.me, a, b === null || (a !== null && a >= b)); pump(205, S.rival, b, b !== null && (a === null || b > a));
-      barrel(160, 200, Math.min(1, PRICES.brent_usd / 120));
-      if (S.t > 1 && Math.floor(S.t * 2) % 2) { g.fillStyle = '#ffe680'; g.beginPath(); g.moveTo(154, 206); g.lineTo(154, 218); g.lineTo(166, 212); g.fill(); }
+      g.fillStyle = 'rgba(10,20,60,.8)'; g.fillRect(WIN.x + 2, WIN.y + 12, WIN.w - 4, WIN.h - 14);
+      flag(g, S.me, 95, 40, 30, 20); flag(g, S.rival, 195, 40, 30, 20);
+      if (S.toss) {
+        // same currency: the coin is tossed
+        const up = Math.min(1, S.t / 1.6), y = 130 - Math.sin(up * Math.PI) * 50;
+        coin(160, y, S.me, 30, false, up < 1 ? S.t * 18 : 0);
+        if (up >= 1) { g.fillStyle = '#ffe680'; g.fillRect(S.meFirst ? 93 : 193, 38, 34, 24); flag(g, S.meFirst ? S.me : S.rival, S.meFirst ? 95 : 195, 40, 30, 20); }
+      } else {
+        const a = strength(S.me), b = strength(S.rival), size = v => v === null ? 30 : Math.max(18, Math.min(42, 30 + v * 12 * Math.min(1, S.t)));
+        coin(110, 120, S.me, size(a), S.meFirst); coin(210, 120, S.rival, size(b), !S.meFirst);
+        if (a !== null) number((a >= 0 ? '+' : '') + a.toFixed(2) + '%', 110, 172); if (b !== null) number((b >= 0 ? '+' : '') + b.toFixed(2) + '%', 210, 172);
+      }
+      // gold bar: the yardstick
+      g.fillStyle = '#ffd34a'; g.beginPath(); g.moveTo(148, 200); g.lineTo(172, 200); g.lineTo(176, 210); g.lineTo(144, 210); g.fill();
+      if (S.t > 2.2 && Math.floor(S.t * 2) % 2) { g.fillStyle = '#ffe680'; g.beginPath(); g.moveTo(154, 186); g.lineTo(154, 196); g.lineTo(163, 191); g.fill(); }
       return;
     }
     if (sc === 'duel' || (sc === 'crash' && S.crash && S.t < .7)) {
@@ -494,10 +511,28 @@ function startTarget() {
     if (sc === 'ending') { live(null); for (let y = 0; y < 226; y += 20) for (let x = 0; x < W; x += 30) flag(g, S.me, x + ((y / 20) % 2) * 15 - 15, y, 28, 18); taskbar(); }
   }
 
+  // wireframe globe, rotating, with a flag on each capital (real latitude and longitude)
+  function globe() {
+    const R = 86, cx = 160, cy = 120, rot = S.t * .35, tilt = .35;
+    const proj = (lat, lon) => {
+      const la = lat * Math.PI / 180, lo = lon * Math.PI / 180 + rot;
+      let x = Math.cos(la) * Math.sin(lo), y = Math.sin(la), z = Math.cos(la) * Math.cos(lo);
+      const y2 = y * Math.cos(tilt) - z * Math.sin(tilt), z2 = y * Math.sin(tilt) + z * Math.cos(tilt);
+      return { x: cx + x * R, y: cy - y2 * R, front: z2 > 0 };
+    };
+    const grad = g.createRadialGradient(cx - 30, cy - 30, 10, cx, cy, R);
+    grad.addColorStop(0, '#7fd0ff'); grad.addColorStop(.6, '#1f5fd0'); grad.addColorStop(1, '#0a246a');
+    g.fillStyle = grad; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = 'rgba(160,230,255,.55)'; g.lineWidth = 1;
+    for (let lon = 0; lon < 360; lon += 20) { g.beginPath(); let on = false; for (let lat = -90; lat <= 90; lat += 6) { const p = proj(lat, lon); if (p.front) { on ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y); on = true; } else on = false; } g.stroke(); }
+    for (let lat = -60; lat <= 60; lat += 20) { g.beginPath(); let on = false; for (let lon = 0; lon <= 360; lon += 6) { const p = proj(lat, lon); if (p.front) { on ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y); on = true; } else on = false; } g.stroke(); }
+    COUNTRIES.forEach(id => { const n = NATIONS[id], p = proj(n.lat, n.lon); if (p.front) pole(p.x, p.y, S.world.conquests[id] || id, 1.1, S.t); });
+    g.strokeStyle = '#0a246a'; g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.stroke();
+  }
+
   // the only words in the game: its title
   function logo() {
     const lines = ['THE GREAT', 'THROW'], sizes = [26, 42], ys = [64, 108];
-    g.fillStyle = 'rgba(10,20,60,.55)'; g.fillRect(52, 34, 216, 100);
     lines.forEach((t, i) => {
       g.font = `900 ${sizes[i]}px "Arial Black", Impact, sans-serif`; g.textAlign = 'center';
       const y = ys[i] + Math.round(Math.sin(S.t * 2 + i) * 1.5);
@@ -520,7 +555,6 @@ function startTarget() {
       g.beginPath(); g.arc(CX, CY, CONFIG.radius + 14, a0 + .06, a1 - .06); g.stroke();
     });
     number(S.influence, WIN.x + WIN.w - 20, WIN.y + WIN.h - 7);
-    barrel(WIN.x + WIN.w - 12, WIN.y + 40, Math.min(1, PRICES.brent_usd / 120));
   }
 
   let prev = performance.now();
