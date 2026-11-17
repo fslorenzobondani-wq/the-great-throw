@@ -108,6 +108,42 @@ const Music = (() => {
   return { start, crash, toggleMute, levels, get muted() { return muted; } };
 })();
 
+/* ============================================================
+   MODEM: a synthesised dial-up connection (original sound, made with Web Audio)
+   ============================================================ */
+const Modem = (() => {
+  let ctx = null, out = null;
+  function unlock() { try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); ctx.resume(); } catch (e) {} }
+  function tone(f, t0, d, type, vol) {
+    const o = ctx.createOscillator(), gn = ctx.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(f, t0);
+    gn.gain.setValueAtTime(vol || .08, t0); gn.gain.setValueAtTime(0, t0 + d);
+    o.connect(gn); gn.connect(out); o.start(t0); o.stop(t0 + d + .02); return o;
+  }
+  function noise(t0, d, freq) {
+    const len = Math.floor(ctx.sampleRate * d), buf = ctx.createBuffer(1, len, ctx.sampleRate), ch = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), gn = ctx.createGain();
+    src.buffer = buf; bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 3; gn.gain.value = .12;
+    src.connect(bp); bp.connect(gn); gn.connect(out); src.start(t0);
+  }
+  function play() {
+    if (!ctx) return;
+    try {
+      out = ctx.createGain(); out.gain.value = .9; out.connect(ctx.destination);
+      let t = ctx.currentTime + .05;
+      const keys = [[697, 1209], [770, 1336], [852, 1477], [941, 1336], [697, 1336], [770, 1477], [852, 1209]];
+      keys.forEach(([a, b]) => { tone(a, t, .08); tone(b, t, .08); t += .13; });             // dialling
+      t += .25; tone(2100, t, .6, 'sine', .06); t += .65;                                    // answer tone
+      for (let i = 0; i < 6; i++) { const o = tone(980 + i * 120, t, .14, 'square', .03); o.frequency.linearRampToValueAtTime(1650 + i * 90, t + .14); t += .16; } // handshake
+      noise(t, .9, 1800); tone(1200, t, .9, 'sawtooth', .02); t += .95;
+      noise(t, .6, 2400);
+    } catch (e) {}
+  }
+  function stop() { try { if (out) { out.gain.setValueAtTime(0, ctx.currentTime); out.disconnect(); out = null; } } catch (e) {} }
+  return { unlock, play, stop };
+})();
+
 const role = new URLSearchParams(location.search).get('role');
 if (role === 'phone') startPhone(); else startTarget();
 
@@ -144,7 +180,7 @@ function startTarget() {
   const WIN = { x: 44, y: 8, w: 232, h: 212 };
 
   const S = {
-    scene: 'title', t: 0, sel: 0, me: null, rival: null,
+    scene: 'off', t: 0, sel: 0, me: null, rival: null, loaded: 0, dataDone: 0,
     wheel: 0, speed: .7, flights: [], planted: [], left: 0, influence: 0,
     crash: null, weather: {}, phone: false, world: load(),
   };
@@ -155,8 +191,9 @@ function startTarget() {
   const SPR = {};
   COUNTRIES.forEach(id => {
     const im = new Image(); SPR[id] = { im, ok: false, mask: null };
+    im.onerror = () => S.loaded++;
     im.onload = () => {
-      SPR[id].ok = true;
+      SPR[id].ok = true; S.loaded++;
       try { const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; const cg = c.getContext('2d'); cg.drawImage(im, 0, 0); SPR[id].mask = cg.getImageData(0, 0, im.width, im.height); }
       catch (e) { SPR[id].mask = null; } // opened as a local file: approximate collision
     };
@@ -169,11 +206,12 @@ function startTarget() {
   const goldOn = date => fetch(`https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${date}/v1/currencies/xau.json`).then(r => r.json()).then(d => d.xau);
   Promise.all([goldOn('latest'), goldOn(iso(new Date(Date.now() - 2 * 864e5)))]).then(([now, before]) => {
     Object.keys(GOLD).forEach(c => { if (now[c] && before[c]) GOLD[c] = (now[c] / before[c] - 1) * 100; });
-  }).catch(() => {});
+  }).catch(() => {}).finally(() => S.dataDone++);
+  { const a = document.getElementById('music'); let once = false; const ok = () => { if (!once) { once = true; S.loaded++; } }; a.addEventListener('canplaythrough', ok); a.addEventListener('error', ok); setTimeout(ok, 4000); }
   COUNTRIES.forEach(id => {
     const n = NATIONS[id];
     fetch(`https://api.open-meteo.com/v1/forecast?latitude=${n.lat}&longitude=${n.lon}&current=cloud_cover,precipitation`)
-      .then(r => r.json()).then(d => { if (d.current) S.weather[id] = { clouds: d.current.cloud_cover, rain: d.current.precipitation }; }).catch(() => {});
+      .then(r => r.json()).then(d => { if (d.current) S.weather[id] = { clouds: d.current.cloud_cover, rain: d.current.precipitation }; }).catch(() => {}).finally(() => S.dataDone++);
   });
   // strength of a coin: if gold got more expensive in your currency, your coin got weaker
   const strength = id => CURRENCY[id] ? -GOLD[CURRENCY[id]] : null;
@@ -242,7 +280,9 @@ function startTarget() {
   function go(sc) { S.scene = sc; S.t = 0; updateQR(); if (sc === 'crash') Music.crash(); }
   function press() {
     const sc = S.scene;
-    if (sc === 'title') { Music.start(); S.sel = 0; go('pickMe'); }
+    if (sc === 'off') { Modem.unlock(); go('post'); }
+    else if (sc === 'post' || sc === 'splash' || sc === 'dial') { Modem.stop(); Music.start(); go('title'); } // skip the intro
+    else if (sc === 'title') { Music.start(); S.sel = 0; go('pickMe'); }
     else if (sc === 'pickMe') { S.me = COUNTRIES[S.sel]; S.sel = S.world.reacting.length ? COUNTRIES.indexOf(S.world.reacting[0]) : 0; go('pickRival'); }
     else if (sc === 'pickRival') { if (COUNTRIES[S.sel] === S.me) return; S.rival = COUNTRIES[S.sel]; S.phone ? coins() : go('pair'); sendFlag(); }
     else if (sc === 'pair') coins(); // no phone: play solo with the mouse
@@ -290,6 +330,10 @@ function startTarget() {
 
   function update(dt) {
     S.t += dt;
+    const sc = S.scene, prog = S.loaded / 10;
+    if (sc === 'post' && S.t > 1.6) go('splash');
+    else if (sc === 'splash' && ((S.t > 2.2 && prog >= 1) || S.t > 6)) { Modem.play(); go('dial'); }
+    else if (sc === 'dial' && ((S.t > 3 && S.dataDone >= 10) || S.t > 7)) { Modem.stop(); Music.start(); go('title'); }
     if (S.scene !== 'duel') return;
     if (S.hold > 0) S.hold -= dt;
     else { S.speed = .55 + Math.sin(S.t * .45) * .9; S.wheel += S.speed * dt; }
@@ -452,9 +496,41 @@ function startTarget() {
 
   function draw() {
     const sc = S.scene;
+    if (sc === 'off') {
+      g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+      // power button
+      const on = Math.floor(S.t * 1.5) % 2;
+      g.strokeStyle = on ? '#7dff9a' : '#2a6a3a'; g.lineWidth = 4;
+      g.beginPath(); g.arc(160, 122, 22, -Math.PI / 2 + .6, Math.PI * 1.5 - .6); g.stroke();
+      g.fillStyle = g.strokeStyle; g.fillRect(158, 92, 4, 28);
+      return;
+    }
+    if (sc === 'post') {
+      // memory check: only numbers
+      g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+      g.fillStyle = '#9dff9d'; g.font = '8px monospace'; g.textAlign = 'left';
+      g.fillText(String(Math.min(65536, Math.floor(S.t * 52000))).padStart(5, '0') + 'K', 12, 20);
+      for (let i = 0; i < Math.min(18, Math.floor(S.t * 14)); i++) g.fillText('0x' + ((i * 2654435761) >>> 0).toString(16).toUpperCase().padStart(8, '0') + '  ' + '█'.repeat(1 + (i * 7) % 12), 12, 36 + i * 10);
+      return;
+    }
+    if (sc === 'splash' || sc === 'dial') {
+      g.fillStyle = '#05103a'; g.fillRect(0, 0, W, H);
+      if (sc === 'splash') logo();
+      else {
+        globe();
+        // two computers, packets running between them
+        const pc = x => { g.fillStyle = '#c9cfd8'; g.fillRect(x, 186, 22, 16); g.fillStyle = '#245edb'; g.fillRect(x + 3, 189, 16, 10); g.fillStyle = '#9aa3b2'; g.fillRect(x + 6, 203, 10, 3); };
+        pc(40); pc(258);
+        for (let i = 0; i < 12; i++) if ((Math.floor(S.t * 10) - i) % 4 === 0) { g.fillStyle = '#ffe680'; g.fillRect(70 + i * 15, 194, 4, 3); }
+      }
+      // progress bar made of blocks: real loading + real data
+      const p = sc === 'splash' ? Math.min(1, S.loaded / 10) : Math.min(1, S.dataDone / 10);
+      g.strokeStyle = '#a9c8ff'; g.lineWidth = 1; g.strokeRect(80.5, 216.5, 160, 10);
+      for (let i = 0; i < Math.round(p * 19); i++) { g.fillStyle = '#2f9e3a'; g.fillRect(83 + i * 8, 219, 6, 5); }
+      return;
+    }
     if (sc === 'title') {
-      desktop('italy');
-      globe();
+      background('italy'); taskbar();
       logo();
       if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#fff'; g.beginPath(); g.moveTo(153, 204); g.lineTo(153, 218); g.lineTo(167, 211); g.fill(); }
       return;
