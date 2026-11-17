@@ -280,8 +280,8 @@ function startTarget() {
   function go(sc) { S.scene = sc; S.t = 0; updateQR(); if (sc === 'crash') Music.crash(); }
   function press() {
     const sc = S.scene;
-    if (sc === 'off') { Modem.unlock(); go('post'); }
-    else if (sc === 'post' || sc === 'splash' || sc === 'dial') { Modem.stop(); Music.start(); go('title'); } // skip the intro
+    if (sc === 'off') { Modem.unlock(); go('splash'); }
+    else if (sc === 'splash' || sc === 'dial') { Modem.stop(); Music.start(); go('title'); } // skip the intro
     else if (sc === 'title') { Music.start(); S.sel = 0; go('pickMe'); }
     else if (sc === 'pickMe') { S.me = COUNTRIES[S.sel]; S.sel = S.world.reacting.length ? COUNTRIES.indexOf(S.world.reacting[0]) : 0; go('pickRival'); }
     else if (sc === 'pickRival') { if (COUNTRIES[S.sel] === S.me) return; S.rival = COUNTRIES[S.sel]; S.phone ? coins() : go('pair'); sendFlag(); }
@@ -331,8 +331,7 @@ function startTarget() {
   function update(dt) {
     S.t += dt;
     const sc = S.scene, prog = S.loaded / 10;
-    if (sc === 'post' && S.t > 1.6) go('splash');
-    else if (sc === 'splash' && ((S.t > 2.2 && prog >= 1) || S.t > 6)) { Modem.play(); go('dial'); }
+    if (sc === 'splash' && ((S.t > 2.2 && prog >= 1) || S.t > 6)) { Modem.play(); go('dial'); }
     else if (sc === 'dial' && ((S.t > 3 && S.dataDone >= 10) || S.t > 7)) { Modem.stop(); Music.start(); go('title'); }
     if (S.scene !== 'duel') return;
     if (S.hold > 0) S.hold -= dt;
@@ -503,14 +502,6 @@ function startTarget() {
       g.strokeStyle = on ? '#7dff9a' : '#2a6a3a'; g.lineWidth = 4;
       g.beginPath(); g.arc(160, 122, 22, -Math.PI / 2 + .6, Math.PI * 1.5 - .6); g.stroke();
       g.fillStyle = g.strokeStyle; g.fillRect(158, 92, 4, 28);
-      return;
-    }
-    if (sc === 'post') {
-      // memory check: only numbers
-      g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
-      g.fillStyle = '#9dff9d'; g.font = '8px monospace'; g.textAlign = 'left';
-      g.fillText(String(Math.min(65536, Math.floor(S.t * 52000))).padStart(5, '0') + 'K', 12, 20);
-      for (let i = 0; i < Math.min(18, Math.floor(S.t * 14)); i++) g.fillText('0x' + ((i * 2654435761) >>> 0).toString(16).toUpperCase().padStart(8, '0') + '  ' + '█'.repeat(1 + (i * 7) % 12), 12, 36 + i * 10);
       return;
     }
     if (sc === 'splash' || sc === 'dial') {
