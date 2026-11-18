@@ -250,13 +250,12 @@ function startTarget() {
       conn.on('data', d => {
         S.signal = 1; // tray phone icon flashes: a message arrived
         if (d.type === 'tap') press();
+        const r = CONFIG.radius * .95, ax = CX + (d.x - .5) * 2.2 * r, ay = CY + (d.y - .5) * 2.2 * r;
+        if (d.type === 'aim') { S.aim = { x: ax, y: ay, t: 1 }; }
         if (d.type === 'throw') {
-          if (S.scene !== 'duel') return press(); // swipe up also moves the game forward
-          // direction left/right = horizontal aim; swipe length = height on the wheel; always lands on the wheel
-          const r = CONFIG.radius * .95, x = d.ax * r, y = r - d.ay * 2 * r, k = Math.min(1, r / Math.hypot(x, y || 1e-6));
-          throwFlag(CX + x * k, CY + y * k);
+          if (S.scene !== 'duel') return press(); // lifting the finger also moves the game forward
+          throwFlag(ax, ay); S.aim = null;
         }
-        if (d.type === 'pick') move(d.dir);
       });
       conn.on('close', () => { S.phone = false; S.conn = null; updateQR(); });
     });
@@ -581,6 +580,7 @@ function startTarget() {
       S.flights.forEach(f => { const t = Math.min(1, f.t), x = CX + (f.tx - CX) * t, y = 250 + (f.ty - 250) * t - Math.sin(t * Math.PI) * 40; pole(x, y, S.me, 2.2 - t * 1.2, S.t); });
       (S.falling || []).forEach(p => { p.v += .25; p.y += p.v; pole(p.x, p.y, S.me, 1, S.t); });
       S.falling = (S.falling || []).filter(p => p.y < 240);
+      if (sc === 'duel' && S.aim) { const a = S.aim, r = 7 + Math.sin(S.t * 10); g.strokeStyle = '#ff2bd6'; g.lineWidth = 2; g.beginPath(); g.arc(a.x, a.y, r, 0, Math.PI * 2); g.stroke(); g.fillStyle = '#ff2bd6'; g.fillRect(a.x - 1, a.y - r - 4, 2, 4); g.fillRect(a.x - 1, a.y + r, 2, 4); g.fillRect(a.x - r - 4, a.y - 1, 4, 2); g.fillRect(a.x + r, a.y - 1, 4, 2); }
       if (sc === 'duel') hud(); else crash();
       return;
     }
@@ -652,17 +652,16 @@ function startPhone() {
   size(); addEventListener('resize', size);
   try { const peer = new Peer(); peer.on('open', () => { conn = peer.connect('greatthrow-' + id); conn.on('open', () => connected = true); conn.on('close', () => connected = false); conn.on('data', d => { if (d.type === 'flag' && COUNTRIES.includes(d.id)) country = COUNTRIES.indexOf(d.id); }); }); } catch (e) {}
   const send = d => { if (conn && connected) conn.send(d); };
-  const begin = (x, y) => { start = { x, y }; };
-  const finish = (x, y) => {
-    if (!start) return;
-    const dx = x - start.x, dy = y - start.y; start = null;
-    if (dy < -25) { send({ type: 'throw', ax: Math.max(-1, Math.min(1, dx / (innerWidth * .4))), ay: Math.max(0, Math.min(1, -dy / (innerHeight * .6))) }); trail = 1; }
-    else send({ type: 'tap' });
-  };
-  cv.addEventListener('pointerdown', e => { e.preventDefault(); begin(e.clientX, e.clientY); });
-  cv.addEventListener('pointerup', e => { e.preventDefault(); finish(e.clientX, e.clientY); });
-  cv.addEventListener('pointercancel', () => start = null);
-  cv.addEventListener('touchmove', e => e.preventDefault(), { passive: false }); // no page scrolling while swiping
+  // touchpad: finger down/move = aim (shown on the laptop), finger up = throw
+  let last = 0, pos = null;
+  const rel = e => ({ x: Math.max(0, Math.min(1, e.clientX / innerWidth)), y: Math.max(0, Math.min(1, e.clientY / innerHeight)) });
+  const aim = e => { pos = rel(e); const now = performance.now(); if (now - last > 40) { last = now; send({ type: 'aim', ...pos }); } };
+  const release = e => { if (!pos) return; if (e && e.clientX !== undefined) pos = rel(e); send({ type: 'throw', ...pos }); pos = null; trail = 1; };
+  cv.addEventListener('pointerdown', e => { e.preventDefault(); aim(e); });
+  cv.addEventListener('pointermove', e => { if (pos) { e.preventDefault(); aim(e); } });
+  cv.addEventListener('pointerup', e => { e.preventDefault(); release(e); });
+  cv.addEventListener('pointercancel', () => release());
+  ['touchstart', 'touchmove'].forEach(t => cv.addEventListener(t, e => e.preventDefault(), { passive: false })); // the page never scrolls
   (function draw() {
     const W = cv.width, H = cv.height;
     // full-screen flag inside a thick pink frame: the laptop webcam will track the frame
