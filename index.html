@@ -184,6 +184,7 @@ function startTarget() {
     wheel: 0, speed: .7, flights: [], planted: [], left: 0, influence: 0,
     crash: null, weather: {}, phone: false, world: load(),
   };
+  window.GT = S; // game state, handy in the browser console for testing
   function load() { try { return JSON.parse(localStorage.getItem('gt-world')) || { conquests: {}, reacting: [] }; } catch (e) { return { conquests: {}, reacting: [] }; } }
   function save() { try { localStorage.setItem('gt-world', JSON.stringify(S.world)); } catch (e) {} }
 
@@ -316,6 +317,47 @@ function startTarget() {
     if (Cam.found) { g.fillStyle = '#ff2bd6'; g.fillRect(x + Cam.x * w - 2, y + Cam.y * h - 2, 4, 4); }
   }
 
+  // --- SCENARIO CARDS: beat a country, win its card; held cards fire at the start of the next duel
+  const CARDS = {
+    italy: 'decree', spain: 'ballot', france: 'veto', germany: 'pact', usa: 'tariffs',
+    russia: 'embargo', china: 'surveillance', saudi: 'petrodollars', northkorea: 'missile',
+  };
+  // pixel icons, drawn in a 16x16 box (no text)
+  function cardIcon(kind, x, y, s) {
+    const p = (px, py, w, h, c) => { g.fillStyle = c; g.fillRect(x + px * s, y + py * s, w * s, h * s); };
+    switch (kind) {
+      case 'decree': p(3, 2, 10, 12, '#f4efe6'); p(5, 4, 6, 1, '#999'); p(5, 6, 6, 1, '#999'); p(8, 9, 6, 5, '#c0392b'); p(9, 10, 4, 3, '#e74c3c'); break;   // stamped paper
+      case 'ballot': p(3, 6, 10, 8, '#245edb'); p(5, 6, 6, 1, '#0a246a'); p(6, 1, 4, 6, '#f4efe6'); p(7, 3, 2, 1, '#c0392b'); break;                            // ballot box
+      case 'veto': p(5, 3, 2, 8, '#f1c27d'); p(7, 2, 2, 9, '#f1c27d'); p(9, 3, 2, 8, '#f1c27d'); p(11, 5, 2, 6, '#f1c27d'); p(4, 9, 9, 5, '#f1c27d'); p(3, 7, 2, 4, '#f1c27d'); break; // raised hand
+      case 'pact': for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; p(7 + Math.round(Math.cos(a) * 5), 7 + Math.round(Math.sin(a) * 5), 2, 2, '#aab'); } p(4, 4, 8, 8, '#aab'); p(6, 6, 4, 4, '#334'); break; // gear
+      case 'tariffs': p(1, 5, 14, 8, '#c0392b'); for (let i = 0; i < 6; i++) p(2 + i * 2, 6, 1, 6, '#8e2a20'); p(6, 1, 4, 4, '#ffd34a'); p(7, 2, 2, 2, '#c0392b'); break;     // container + padlock
+      case 'embargo': p(2, 7, 12, 3, '#888'); p(6, 3, 4, 10, '#666'); p(4, 1, 8, 2, '#c0392b'); break;                                                                // shut valve
+      case 'surveillance': p(1, 6, 14, 5, '#f4efe6'); p(3, 5, 10, 1, '#f4efe6'); p(3, 11, 10, 1, '#f4efe6'); p(6, 6, 4, 5, '#245edb'); p(7, 7, 2, 3, '#000'); break;     // eye
+      case 'petrodollars': p(4, 2, 8, 12, '#d4a017'); p(4, 5, 8, 1, '#8a6418'); p(4, 10, 8, 1, '#8a6418'); p(6, 0, 4, 2, '#d4a017'); break;                            // gold barrel
+      case 'missile': p(7, 1, 2, 2, '#c0392b'); p(6, 3, 4, 9, '#ccc'); p(4, 10, 2, 4, '#888'); p(10, 10, 2, 4, '#888'); p(7, 12, 2, 3, '#ffb000'); break;               // missile
+    }
+  }
+  // a trading card: nation-coloured frame, icon in the middle
+  function card(kind, from, x, y, w, h, flipX) {
+    g.save(); g.translate(x + w / 2, y + h / 2); g.scale(flipX === undefined ? 1 : Math.max(.05, Math.abs(flipX)), 1); g.translate(-w / 2, -h / 2);
+    if (flipX !== undefined && flipX < 0) { // back of the card
+      g.fillStyle = '#0a246a'; g.fillRect(0, 0, w, h); for (let i = 0; i < 6; i++) { g.fillStyle = i % 2 ? '#f4efe6' : '#d32626'; g.beginPath(); g.arc(w / 2, h / 2, (6 - i) * w / 14, 0, Math.PI * 2); g.fill(); }
+    } else {
+      g.fillStyle = '#ffe680'; g.fillRect(0, 0, w, h);
+      flag(g, from, 2, 2, w - 4, Math.round(h * .22));
+      g.fillStyle = '#1b1b3a'; g.fillRect(2, Math.round(h * .26), w - 4, h - Math.round(h * .26) - 2);
+      const s = Math.max(1, Math.floor((w - 8) / 16)); cardIcon(kind, Math.round((w - 16 * s) / 2), Math.round(h * .3 + (h * .7 - 16 * s) / 2), s);
+    }
+    g.restore();
+  }
+  // apply held cards to a new duel
+  function playCards() {
+    const fx = {}; (S.world.cards || []).forEach(c => fx[c.kind] = true);
+    S.fx = fx; S.active = (S.world.cards || []).slice(); S.world.cards = []; save();
+    if (fx.decree) S.left++;
+    if (fx.missile) S.missileAt = 1.2;
+  }
+
   // --- laptop input
   const pos = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
   cv.addEventListener('pointerdown', e => {
@@ -346,8 +388,8 @@ function startTarget() {
     else if (sc === 'pair') coins(); // no phone: play solo with the mouse
     else if (sc === 'coins' && S.t > 2.2) duel();
     else if (sc === 'crash' && S.t > 1.2) duel();
-    else if (sc === 'win' && S.t > 1.2) go(Object.keys(S.world.conquests).length >= 8 ? 'ending' : 'pickRival');
-    else if (sc === 'ending' && S.t > 2) { S.world = { conquests: {}, reacting: [] }; save(); go('title'); }
+    else if (sc === 'win' && S.t > 3) go(Object.keys(S.world.conquests).length >= 8 ? 'ending' : 'pickRival');
+    else if (sc === 'ending' && S.t > 2) { S.world = { conquests: {}, reacting: [], cards: [] }; save(); go('title'); }
   }
 
   function coins() { decide(); go('coins'); }
@@ -357,6 +399,7 @@ function startTarget() {
     S.flights = []; S.planted = []; S.left = CONFIG.flags; S.influence = 0; S.wheel = 0;
     // the weaker coin gets the advantage: the wheel starts still
     S.hold = S.meFirst ? 1.5 : 0;
+    S.falling = []; S.ballotUsed = false; playCards();
   }
 
   // --- throwing
@@ -395,24 +438,40 @@ function startTarget() {
     else if (sc === 'dial' && ((S.t > 3 && S.dataDone >= 10) || S.t > 7)) { Modem.stop(); Music.start(); go('title'); }
     if (S.scene !== 'duel') return;
     if (S.hold > 0) S.hold -= dt;
-    else { S.speed = .55 + Math.sin(S.t * .45) * .9; S.wheel += S.speed * dt; }
+    else {
+      S.speed = .55 + Math.sin(S.t * .45) * .9;
+      if (S.fx.pact) S.speed = .45;                                   // stability pact: slow and steady
+      if (S.fx.tariffs) S.speed *= .6;                                // tariffs: everything slows down
+      if (S.fx.embargo && S.t > 4 && S.t < 7) S.speed = 0;            // energy embargo: the wheel stops
+      S.wheel += S.speed * dt;
+    }
+    if (S.missileAt !== undefined && S.t > S.missileAt) {             // missile: one flag plants itself in an empty sector
+      S.missileAt = undefined;
+      const cov = sectors();
+      for (let i = 0; i < CONFIG.sectors; i++) if (!cov[i]) {
+        const a = (i + .5) / CONFIG.sectors * Math.PI * 2, l = { x: Math.cos(a) * 76, y: Math.sin(a) * 76 };
+        if (!hitsLeader(l)) { S.planted.push({ l, t: 0 }); break; }
+      }
+    }
     for (const f of S.flights) {
       f.t += dt / .42;
       if (f.t < 1 || f.done) continue;
       f.done = true;
       const l = toWheel(f.tx, f.ty);
+      if (hitsLeader(l) && S.fx.veto) { S.fx.veto = false; S.vetoFlash = 1; S.falling.push({ x: f.tx, y: f.ty, v: -2 }); continue; } // veto: first touch forgiven
       if (hitsLeader(l)) {
         S.crash = { x: f.tx, y: f.ty, cracks: Array.from({ length: 14 }, () => ({ a: Math.random() * Math.PI * 2, r: 30 + Math.random() * 140, k: Math.random() })) };
         go('crash'); return;
       }
       const d = Math.hypot(l.x, l.y);
-      if (d <= CONFIG.radius) { S.planted.push({ l, t: 0 }); S.influence += Math.max(0, Math.round(100 - d)); }
-      else (S.falling = S.falling || []).push({ x: f.tx, y: f.ty, v: 0 });
+      if (d <= CONFIG.radius) { S.planted.push({ l, t: 0 }); S.influence += Math.max(0, Math.round(100 - d)) * (S.fx.petrodollars ? 2 : 1); }
+      else { S.falling.push({ x: f.tx, y: f.ty, v: 0 }); if (S.fx.ballot && !S.ballotUsed) { S.ballotUsed = true; S.left++; } } // ballot: first miss comes back
     }
     S.flights = S.flights.filter(f => !f.done);
     S.planted.forEach(p => p.t += dt);
     if (sectors().every(Boolean)) {
       S.world.conquests[S.rival] = S.me;
+      S.world.cards = (S.world.cards || []).concat({ kind: CARDS[S.rival], from: S.rival }).slice(-3);
       S.world.reacting = REACTIONS[S.rival].filter(id => !S.world.conquests[id] && id !== S.me);
       save(); go('win');
     } else if (S.left === 0 && !S.flights.length) { S.crash = null; go('crash'); }
@@ -449,6 +508,7 @@ function startTarget() {
     taskbar();
   }
   function taskbar() {
+    (S.world.cards || []).forEach((c, i) => card(c.kind, c.from, 46 + i * 12, 227, 10, 12));
     // phone icon: green when connected, flashes white when a gesture arrives
     if (S.phone) { S.signal = Math.max(0, (S.signal || 0) - .05); g.fillStyle = S.signal > 0 ? '#ffffff' : '#7dff9a'; g.fillRect(232, 228, 6, 10); g.fillStyle = '#1f4fb8'; g.fillRect(233, 229, 4, 7); }
     g.fillStyle = '#1f4fb8'; g.fillRect(0, 226, W, 14);
@@ -490,8 +550,12 @@ function startTarget() {
     // rim with bulbs
     g.strokeStyle = '#c8a14a'; g.lineWidth = 4; g.beginPath(); g.arc(0, 0, R, 0, Math.PI * 2); g.stroke();
     for (let i = 0; i < 20; i++) { const a = i / 20 * Math.PI * 2; g.fillStyle = (Math.floor(S.t * 5) + i) % 2 ? '#fff3a0' : '#8a6a20'; g.fillRect(Math.round(Math.cos(a) * R) - 1, Math.round(Math.sin(a) * R) - 1, 3, 3); }
-    // the leader, strapped to the wheel
     const sp = SPR[S.rival];
+    if (S.scene === 'duel' && S.fx && S.fx.surveillance && sp && sp.ok) {      // surveillance: ghost of the leader 0.42 s ahead
+      const k = leaderScale(); g.save(); g.rotate(S.speed * .42); g.globalAlpha = .28;
+      g.drawImage(sp.im, -sp.im.width * k / 2, -sp.im.height * k / 2, sp.im.width * k, sp.im.height * k); g.restore();
+    }
+    // the leader, strapped to the wheel
     if (sp && sp.ok) { const k = leaderScale(), jx = (Math.random() - .5) * .6; g.drawImage(sp.im, -sp.im.width * k / 2 + jx, -sp.im.height * k / 2, sp.im.width * k, sp.im.height * k); }
     g.restore();
     g.fillStyle = '#4a3a20'; g.fillRect(CX - 3, CY + R - 2, 6, 34); // stand
@@ -647,7 +711,17 @@ function startTarget() {
       return;
     }
     if (sc === 'crash') { crash(); return; }
-    if (sc === 'win') { desktop(S.rival); const s = Math.min(1, S.t * 1.5); flag(g, S.me, 160 - 60 * s, 118 - 40 * s, 120 * s, 80 * s); return; }
+    if (sc === 'win') {
+      desktop(S.rival);
+      const s = Math.min(1, S.t * 1.5), fade = Math.max(0, 1 - Math.max(0, S.t - 1) * 2);
+      g.globalAlpha = fade; flag(g, S.me, 160 - 60 * s, 118 - 40 * s, 120 * s, 80 * s); g.globalAlpha = 1;
+      if (S.t > .9) {
+        const kind = CARDS[S.rival], t = S.t - .9;
+        if (t < 1.6) card(kind, S.rival, 130, 70, 60, 84, Math.cos(Math.max(0, 1 - t) * Math.PI));   // flips over
+        else { const k = Math.min(1, (t - 1.6) / .5); card(kind, S.rival, 130 + (52 - 130) * k, 70 + (226 - 70) * k, 60 - 46 * k, 84 - 70 * k); } // flies to the taskbar
+      }
+      return;
+    }
     if (sc === 'ending') { live(null); for (let y = 0; y < 226; y += 20) for (let x = 0; x < W; x += 30) flag(g, S.me, x + ((y / 20) % 2) * 15 - 15, y, 28, 18); taskbar(); }
   }
 
@@ -686,6 +760,8 @@ function startTarget() {
   }
 
   function hud() {
+    (S.active || []).forEach((c, i) => card(c.kind, c.from, WIN.x + WIN.w - 22 - i * 20, WIN.y + 16, 16, 22));
+    if (S.vetoFlash > 0) { S.vetoFlash -= .03; g.fillStyle = `rgba(255,255,255,${S.vetoFlash * .5})`; g.fillRect(WIN.x, WIN.y, WIN.w, WIN.h); }
     // flags left (bottom of the window)
     for (let i = 0; i < CONFIG.flags; i++) { if (i < S.left) flag(g, S.me, WIN.x + 6 + i * 15, WIN.y + WIN.h - 14, 12, 8); else { g.fillStyle = 'rgba(0,0,0,.4)'; g.fillRect(WIN.x + 6 + i * 15, WIN.y + WIN.h - 14, 12, 8); } }
     // ring sectors
