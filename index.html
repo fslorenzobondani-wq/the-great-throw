@@ -185,7 +185,7 @@ function startTarget() {
     crash: null, weather: {}, phone: false, world: load(),
   };
   window.GT = S; // game state, handy in the browser console for testing
-  function load() { try { return JSON.parse(localStorage.getItem('gt-world')) || { conquests: {}, reacting: [] }; } catch (e) { return { conquests: {}, reacting: [] }; } }
+  function load() { try { return JSON.parse(localStorage.getItem('gt-world')) || { conquests: {}, open: [], cards: [] }; } catch (e) { return { conquests: {}, open: [], cards: [] }; } }
   function save() { try { localStorage.setItem('gt-world', JSON.stringify(S.world)); } catch (e) {} }
 
   // --- sprites + collision masks
@@ -334,11 +334,16 @@ function startTarget() {
       case 'gas': p(2, 7, 12, 3, '#888'); p(6, 3, 4, 10, '#666'); p(4, 1, 8, 2, '#c0392b'); break;                                                                // shut valve
       case 'surveillance': p(1, 6, 14, 5, '#f4efe6'); p(3, 5, 10, 1, '#f4efe6'); p(3, 11, 10, 1, '#f4efe6'); p(6, 6, 4, 5, '#245edb'); p(7, 7, 2, 3, '#000'); break;     // eye
       case 'oil': p(4, 2, 8, 12, '#d4a017'); p(4, 5, 8, 1, '#8a6418'); p(4, 10, 8, 1, '#8a6418'); p(6, 0, 4, 2, '#d4a017'); break;                            // gold barrel
+      case 'arms': p(1, 8, 6, 6, '#6b5a2b'); p(9, 8, 6, 6, '#6b5a2b'); p(2, 10, 4, 1, '#3a2f15'); p(10, 10, 4, 1, '#3a2f15'); p(4, 3, 8, 2, '#888'); p(10, 2, 3, 4, '#888'); p(6, 5, 1, 3, '#888'); break;    // crates + rifle
+      case 'sanctions': p(2, 6, 12, 9, '#c9a227'); p(4, 1, 2, 6, '#bbb'); p(10, 1, 2, 6, '#bbb'); p(4, 1, 8, 2, '#bbb'); p(7, 9, 2, 3, '#3a2f15'); break;                                   // padlock
+      case 'summit': g.fillStyle = '#8a5a2b'; g.beginPath(); g.ellipse(x + 8 * s, y + 9 * s, 7 * s, 4 * s, 0, 0, Math.PI * 2); g.fill(); ['#ce2b37', '#0055a4', '#ffce00', '#009246', '#de2910', '#fff'].forEach((c, i) => { const a = i / 6 * Math.PI * 2; p(7 + Math.round(Math.cos(a) * 7), 8 + Math.round(Math.sin(a) * 5), 2, 2, c); }); break; // round table
+      case 'alliance': p(1, 7, 6, 4, '#f1c27d'); p(9, 7, 6, 4, '#e0ac69'); p(6, 6, 4, 6, '#f1c27d'); p(0, 6, 2, 6, '#245edb'); p(14, 6, 2, 6, '#c0392b'); break;                       // handshake
+      case 'roulette': for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? '#111' : '#c0392b'; g.beginPath(); g.moveTo(x + 8 * s, y + 8 * s); g.arc(x + 8 * s, y + 8 * s, 7 * s, i * Math.PI / 4 + S.t * 4, (i + 1) * Math.PI / 4 + S.t * 4); g.fill(); } p(7, 7, 2, 2, '#ffd34a'); break; // spinning wheel
       case 'missile': p(7, 1, 2, 2, '#c0392b'); p(6, 3, 4, 9, '#ccc'); p(4, 10, 2, 4, '#888'); p(10, 10, 2, 4, '#888'); p(7, 12, 2, 3, '#ffb000'); break;               // missile
     }
   }
   // a trading card: nation-coloured frame, icon in the middle
-  function card(kind, from, x, y, w, h, flipX, blink) {
+  function card(kind, from, x, y, w, h, flipX, blink, open) {
     g.save(); g.translate(x + w / 2, y + h / 2); g.scale(flipX === undefined ? 1 : Math.max(.05, Math.abs(flipX)), 1); g.translate(-w / 2, -h / 2);
     if (flipX !== undefined && flipX < 0) { // back of the card
       g.fillStyle = '#0a246a'; g.fillRect(0, 0, w, h); for (let i = 0; i < 6; i++) { g.fillStyle = i % 2 ? '#f4efe6' : '#d32626'; g.beginPath(); g.arc(w / 2, h / 2, (6 - i) * w / 14, 0, Math.PI * 2); g.fill(); }
@@ -346,11 +351,54 @@ function startTarget() {
       g.fillStyle = '#ffe680'; g.fillRect(0, 0, w, h);
       flag(g, from, 2, 2, w - 4, Math.round(h * .22));
       g.fillStyle = '#1b1b3a'; g.fillRect(2, Math.round(h * .26), w - 4, h - Math.round(h * .26) - 2);
-      const s = Math.max(1, Math.floor((w - 8) / 20)); cardIcon(kind, Math.round((w - 16 * s) / 2), Math.round(h * .3), s);
-      const r = REACTIONS[from], fw = Math.round((w - 10) / 2), fh = Math.round(fw * .66), fy = h - fh - 4;
-      if (h > 30) r.forEach((id, i) => { if (!(blink && Math.floor(S.t * 4) % 2)) flag(g, id, 4 + i * (fw + 2), fy, fw, fh); });
+      const s = Math.max(1, Math.floor(Math.min(w - 8, h * .38) / 16)); cardIcon(kind, Math.round((w - 16 * s) / 2), Math.round(h * .31), s);
+      const r = (open || []).slice(0, 4), n = Math.max(1, r.length), fw = Math.round((w - 6 - (n - 1) * 2) / Math.max(2, n)), fh = Math.round(fw * .66), fy = h - fh - 5, ox = Math.round((w - n * fw - (n - 1) * 2) / 2);
+      if (h > 30) r.forEach((id, i) => { if (!(blink && Math.floor(S.t * 4) % 2)) flag(g, id, ox + i * (fw + 2), fy, fw, fh); });
+      if (h > 30 && kind === 'alliance' && r.length === 2) { g.fillStyle = '#f1c27d'; g.fillRect(ox + fw - 2, fy + fh / 2 - 1, 6, 3); } // handshake between the two
     }
     g.restore();
+  }
+
+  // --- SCENARIO CARDS (like Monopoly's Chance cards): after every win a card appears on its own,
+  // tells a small real-politics story and decides who you can challenge next
+  const SCENARIOS = [
+    { kind: 'tariffs',   when: ['usa', 'china'],              rule: 'forced',   pick: b => b === 'usa' ? ['china'] : ['usa'] },          // trade war
+    { kind: 'gas',       when: ['russia', 'germany'],         rule: 'forced',   pick: b => b === 'russia' ? ['germany'] : ['russia'] },  // pipeline shut
+    { kind: 'migration', when: ['italy', 'spain', 'france'],  rule: 'choice',   pick: () => ['italy', 'spain', 'france'] },              // Mediterranean crisis
+    { kind: 'oil',       when: ['saudi', 'russia', 'usa'],    rule: 'choice',   pick: () => ['saudi', 'russia', 'usa'] },                // oil shock
+    { kind: 'arms',      when: ['france', 'saudi'],           rule: 'choice',   pick: () => ['france', 'saudi', 'usa'] },                // arms deal
+    { kind: 'missile',   when: ['northkorea', 'china'],       rule: 'choice',   pick: () => ['usa', 'china'] },                          // missile test
+    { kind: 'sanctions', when: null,                          rule: 'forced',   pick: () => ['russia', 'northkorea'] },                  // sanctions
+    { kind: 'ballot',    when: null, likes: ['spain'],        rule: 'election' },                                                        // snap election
+    { kind: 'summit',    when: null,                          rule: 'free' },                                                            // international summit
+    { kind: 'alliance',  when: null,                          rule: 'alliance' },                                                        // two allies fall together
+    { kind: 'roulette',  when: null,                          rule: 'roulette' },                                                        // twist of fate
+  ];
+  const ALLIES = [['russia', 'northkorea'], ['russia', 'china'], ['china', 'northkorea'], ['usa', 'saudi'], ['france', 'germany'], ['italy', 'spain'], ['usa', 'germany']];
+  const left = () => COUNTRIES.filter(id => id !== S.me && !S.world.conquests[id]);
+  // what a scenario would open, given the world right now (empty = cannot happen)
+  function outcome(sc, beaten) {
+    const free = left();
+    if (sc.rule === 'forced' || sc.rule === 'choice') { const o = sc.pick(beaten).filter(id => free.includes(id)); return sc.rule === 'forced' ? o.slice(0, 1) : o; }
+    if (sc.rule === 'free') return free;
+    if (sc.rule === 'roulette') return free.length ? [free[Math.floor(Math.random() * free.length)]] : [];
+    if (sc.rule === 'election') { const mine = Object.keys(S.world.conquests).filter(id => id !== beaten && id !== S.me); return mine.length ? [mine[Math.floor(Math.random() * mine.length)]] : []; }
+    if (sc.rule === 'alliance') { const pairs = ALLIES.filter(([a, b]) => free.includes(a) && free.includes(b)); if (!pairs.length) return []; const p = pairs[Math.floor(Math.random() * pairs.length)]; return p; }
+    return [];
+  }
+  function scenarioAfter(beaten) {
+    const linked = SCENARIOS.filter(sc => sc.when && sc.when.includes(beaten)).map(sc => ({ sc, o: outcome(sc, beaten) })).filter(x => x.o.length);
+    const general = SCENARIOS.filter(sc => !sc.when).flatMap(sc => (sc.likes && sc.likes.includes(beaten) ? [sc, sc, sc] : [sc])).map(sc => ({ sc, o: outcome(sc, beaten) })).filter(x => x.o.length);
+    const pool = linked.length && Math.random() < .7 ? linked : general.length ? general : linked;
+    if (!pool.length) return { kind: 'summit', rule: 'free', open: left() };
+    const { sc, o } = pool[Math.floor(Math.random() * pool.length)];
+    return { kind: sc.kind, rule: sc.rule, open: o };
+  }
+  // apply the card to the world
+  function applyScenario(c) {
+    S.world.open = c.open; S.world.alliance = null;
+    if (c.rule === 'election') delete S.world.conquests[c.open[0]];          // the country you held votes you out: win it back
+    if (c.rule === 'alliance') { S.world.alliance = c.open.slice(); S.world.open = [c.open[0]]; } // beat one, the ally falls too
   }
 
   // --- laptop input
@@ -372,7 +420,7 @@ function startTarget() {
   });
   function allowed(id) {
     if (id === S.me) return false;
-    const open = S.world.reacting.filter(r => !S.world.conquests[r] && r !== S.me);
+    const open = (S.world.open || []).filter(r => !S.world.conquests[r] && r !== S.me);
     return open.length ? open.includes(id) : !S.world.conquests[id];
   }
   function move(d) { if (S.scene === 'pickMe') S.sel = (S.sel + d + 9) % 9; if (S.scene === 'pickRival') { for (let i = 0; i < 9; i++) { S.sel = (S.sel + d + 9) % 9; if (allowed(COUNTRIES[S.sel])) break; } } }
@@ -389,7 +437,7 @@ function startTarget() {
     else if (sc === 'coins' && S.t > 2.2) duel();
     else if (sc === 'crash' && S.t > 1.2) duel();
     else if (sc === 'win' && S.t > 4) { go(Object.keys(S.world.conquests).length >= 8 ? 'ending' : 'pickRival'); if (S.scene === 'pickRival' && !allowed(COUNTRIES[S.sel])) move(1); }
-    else if (sc === 'ending' && S.t > 2) { S.world = { conquests: {}, reacting: [], cards: [] }; save(); go('title'); }
+    else if (sc === 'ending' && S.t > 2) { S.world = { conquests: {}, open: [], cards: [] }; save(); go('title'); }
   }
 
   function coins() { decide(); go('coins'); }
@@ -459,8 +507,9 @@ function startTarget() {
     S.planted.forEach(p => p.t += dt);
     if (sectors().every(Boolean)) {
       S.world.conquests[S.rival] = S.me;
-      S.world.cards = (S.world.cards || []).concat({ kind: CARDS[S.rival], from: S.rival });
-      S.world.reacting = REACTIONS[S.rival].filter(id => !S.world.conquests[id] && id !== S.me);
+      const al = S.world.alliance; if (al && al.includes(S.rival)) al.forEach(id => S.world.conquests[id] = S.me); // the alliance falls together
+      S.scenario = scenarioAfter(S.rival); applyScenario(S.scenario);
+      S.world.cards = (S.world.cards || []).concat({ kind: S.scenario.kind, from: S.rival, open: S.scenario.open });
       save(); go('win');
     } else if (S.left === 0 && !S.flights.length) { S.crash = null; go('crash'); }
   }
@@ -487,7 +536,7 @@ function startTarget() {
     background(bgOf);
     // one icon per nation
     COUNTRIES.forEach((id, i) => {
-      const x = 6, y = 6 + i * 23, cq = S.world.conquests[id], re = S.world.reacting.includes(id);
+      const x = 6, y = 6 + i * 23, cq = S.world.conquests[id], re = (S.world.open || []).includes(id);
       if (re && Math.floor(S.t * 3) % 2) { g.fillStyle = 'rgba(80,140,255,.6)'; g.fillRect(x - 2, y - 2, 30, 22); }
       head(id, x + 4, y, 16);
       flag(g, cq || id, x + 14, y + 10, 14, 9);
@@ -496,7 +545,7 @@ function startTarget() {
     taskbar();
   }
   function taskbar() {
-    (S.world.cards || []).slice(-9).forEach((c, i) => card(c.kind, c.from, 46 + i * 12, 227, 10, 12));
+    (S.world.cards || []).slice(-9).forEach((c, i) => card(c.kind, c.from, 46 + i * 12, 227, 10, 12, undefined, false, c.open));
     // phone icon: green when connected, flashes white when a gesture arrives
     if (S.phone) { S.signal = Math.max(0, (S.signal || 0) - .05); g.fillStyle = S.signal > 0 ? '#ffffff' : '#7dff9a'; g.fillRect(232, 228, 6, 10); g.fillStyle = '#1f4fb8'; g.fillRect(233, 229, 4, 7); }
     g.fillStyle = '#1f4fb8'; g.fillRect(0, 226, W, 14);
@@ -577,7 +626,7 @@ function startTarget() {
       const h = sel ? 84 : 70, y = 170 - h + (sel ? Math.round(Math.sin(S.t * 8) * 2) : 0);
       const dim = rivalPick && !allowed(id);
       if (sel) { g.fillStyle = 'rgba(255,240,140,.5)'; g.fillRect(x - 17, y - 4, 34, h + 8); }
-      if (rivalPick && S.world.reacting.includes(id) && Math.floor(S.t * 3) % 2) { g.strokeStyle = '#3a7bf0'; g.lineWidth = 2; g.strokeRect(x - 16, y - 3, 32, h + 6); }
+      if (rivalPick && allowed(id) && Math.floor(S.t * 3) % 2) { g.strokeStyle = '#3a7bf0'; g.lineWidth = 2; g.strokeRect(x - 16, y - 3, 32, h + 6); }
       if (sp.ok) { const k = h / sp.im.height; g.globalAlpha = dim ? .3 : 1; g.drawImage(sp.im, x - sp.im.width * k / 2, y, sp.im.width * k, h); g.globalAlpha = 1; }
       flag(g, id, x - 7, 192, 14, 9);
       if (cq) flag(g, cq, x - 6, y - 12, 12, 8);
@@ -700,10 +749,11 @@ function startTarget() {
       const s = Math.min(1, S.t * 1.5), fade = Math.max(0, 1 - Math.max(0, S.t - 1) * 2);
       g.globalAlpha = fade; flag(g, S.me, 160 - 60 * s, 118 - 40 * s, 120 * s, 80 * s); g.globalAlpha = 1;
       if (S.t > .9) {
-        const kind = CARDS[S.rival], t = S.t - .9;
-        if (t < 1) card(kind, S.rival, 120, 50, 80, 112, Math.cos((1 - t) * Math.PI));                 // flips over
-        else if (t < 2.6) card(kind, S.rival, 120, 50, 80, 112, undefined, true);                          // the two countries that react blink
-        else { const k = Math.min(1, (t - 2.6) / .5), n = Math.min(8, S.world.cards.length - 1); card(kind, S.rival, 120 + (46 + n * 12 - 120) * k, 50 + (227 - 50) * k, 80 - 70 * k, 112 - 100 * k); } // filed in the taskbar
+        const c = S.scenario, kind = c.kind, t = S.t - .9;
+        let open = c.open; if (c.rule === 'roulette' && t < 2.2) open = [left()[Math.floor(S.t * 12) % Math.max(1, left().length)] || c.open[0]]; // roulette spinning
+        if (t < 1) card(kind, S.rival, 120, 50, 80, 112, Math.cos((1 - t) * Math.PI), false, open);     // appears and flips over
+        else if (t < 2.6) card(kind, S.rival, 120, 50 + Math.round(Math.sin(t * 6) * 2), 80, 112, undefined, c.rule !== 'roulette' || t > 2.2, open); // the story: who comes next
+        else { const k = Math.min(1, (t - 2.6) / .5), n = Math.min(8, S.world.cards.length - 1); card(kind, S.rival, 120 + (46 + n * 12 - 120) * k, 50 + (227 - 50) * k, 80 - 70 * k, 112 - 100 * k, undefined, false, open); } // filed in the taskbar
       }
       return;
     }
