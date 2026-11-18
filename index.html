@@ -339,6 +339,12 @@ function startTarget() {
       case 'summit': g.fillStyle = '#8a5a2b'; g.beginPath(); g.ellipse(x + 8 * s, y + 9 * s, 7 * s, 4 * s, 0, 0, Math.PI * 2); g.fill(); ['#ce2b37', '#0055a4', '#ffce00', '#009246', '#de2910', '#fff'].forEach((c, i) => { const a = i / 6 * Math.PI * 2; p(7 + Math.round(Math.cos(a) * 7), 8 + Math.round(Math.sin(a) * 5), 2, 2, c); }); break; // round table
       case 'alliance': p(1, 7, 6, 4, '#f1c27d'); p(9, 7, 6, 4, '#e0ac69'); p(6, 6, 4, 6, '#f1c27d'); p(0, 6, 2, 6, '#245edb'); p(14, 6, 2, 6, '#c0392b'); break;                       // handshake
       case 'roulette': for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? '#111' : '#c0392b'; g.beginPath(); g.moveTo(x + 8 * s, y + 8 * s); g.arc(x + 8 * s, y + 8 * s, 7 * s, i * Math.PI / 4 + S.t * 4, (i + 1) * Math.PI / 4 + S.t * 4); g.fill(); } p(7, 7, 2, 2, '#ffd34a'); break; // spinning wheel
+      case 'debt': g.fillStyle = '#d4a017'; g.beginPath(); g.arc(x + 6 * s, y + 8 * s, 5 * s, 0, Math.PI * 2); g.fill(); p(4, 6, 4, 1, '#8a6418'); p(4, 9, 4, 1, '#8a6418'); p(12, 3, 2, 9, '#c0392b'); p(10, 10, 6, 2, '#c0392b'); p(11, 12, 4, 1, '#c0392b'); p(12, 13, 2, 1, '#c0392b'); break; // coin + falling arrow
+      case 'car': p(2, 8, 12, 4, '#c0392b'); p(4, 5, 8, 3, '#c0392b'); p(5, 6, 6, 2, '#9fd0ff'); p(3, 12, 3, 3, '#111'); p(10, 12, 3, 3, '#111'); break;          // car (exports)
+      case 'expo': p(7, 1, 2, 13, '#ccc'); p(4, 6, 8, 2, '#ccc'); p(2, 13, 12, 2, '#888'); p(6, 0, 4, 2, '#ffd34a'); break;                                       // expo tower
+      case 'port': p(0, 12, 16, 4, '#245edb'); p(2, 8, 12, 4, '#c0392b'); p(4, 5, 3, 3, '#2f9e3a'); p(8, 5, 3, 3, '#ffd34a'); p(13, 1, 1, 8, '#888'); p(10, 1, 4, 1, '#888'); break; // port: ship + crane
+      case 'base': p(1, 13, 14, 2, '#5a6b3a'); p(6, 4, 4, 8, '#888'); p(2, 7, 12, 2, '#888'); p(5, 11, 6, 1, '#888'); p(7, 1, 2, 3, '#888'); break;                // air base: jet
+      case 'raid': p(4, 1, 8, 14, '#8a5a2b'); p(5, 2, 6, 12, '#6b4420'); p(9, 8, 1, 1, '#ffd34a'); p(1, 6, 3, 1, '#fff'); p(12, 6, 3, 1, '#fff'); p(0, 9, 3, 1, '#fff'); break; // door kicked in
       case 'missile': p(7, 1, 2, 2, '#c0392b'); p(6, 3, 4, 9, '#ccc'); p(4, 10, 2, 4, '#888'); p(10, 10, 2, 4, '#888'); p(7, 12, 2, 3, '#ffb000'); break;               // missile
     }
   }
@@ -360,39 +366,55 @@ function startTarget() {
   }
 
   // --- SCENARIO CARDS (like Monopoly's Chance cards): after every win a card appears on its own,
-  // tells a small real-politics story and decides who you can challenge next
-  const SCENARIOS = [
-    { kind: 'tariffs',   when: ['usa', 'china'],              rule: 'forced',   pick: b => b === 'usa' ? ['china'] : ['usa'] },          // trade war
-    { kind: 'gas',       when: ['russia', 'germany'],         rule: 'forced',   pick: b => b === 'russia' ? ['germany'] : ['russia'] },  // pipeline shut
-    { kind: 'migration', when: ['italy', 'spain', 'france'],  rule: 'choice',   pick: () => ['italy', 'spain', 'france'] },              // Mediterranean crisis
-    { kind: 'oil',       when: ['saudi', 'russia', 'usa'],    rule: 'choice',   pick: () => ['saudi', 'russia', 'usa'] },                // oil shock
-    { kind: 'arms',      when: ['france', 'saudi'],           rule: 'choice',   pick: () => ['france', 'saudi', 'usa'] },                // arms deal
-    { kind: 'missile',   when: ['northkorea', 'china'],       rule: 'choice',   pick: () => ['usa', 'china'] },                          // missile test
-    { kind: 'sanctions', when: null,                          rule: 'forced',   pick: () => ['russia', 'northkorea'] },                  // sanctions
-    { kind: 'ballot',    when: null, likes: ['spain'],        rule: 'election' },                                                        // snap election
-    { kind: 'summit',    when: null,                          rule: 'free' },                                                            // international summit
-    { kind: 'alliance',  when: null,                          rule: 'alliance' },                                                        // two allies fall together
-    { kind: 'roulette',  when: null,                          rule: 'roulette' },                                                        // twist of fate
+  // tells a small real-politics story and decides who you can challenge next.
+  // STORIES: for every beaten country, real links towards every other country (1 country = forced, more = choice)
+  const STORIES = {
+    italy:      [{ kind: 'migration', opens: ['spain', 'france'] }, { kind: 'debt', opens: ['germany'] }, { kind: 'port', opens: ['china'] },
+                 { kind: 'gas', opens: ['russia'] }, { kind: 'tariffs', opens: ['usa'] }, { kind: 'expo', opens: ['saudi'] }, { kind: 'summit', opens: ['northkorea'] }],
+    spain:      [{ kind: 'migration', opens: ['italy', 'france'] }, { kind: 'base', opens: ['usa'] }, { kind: 'arms', opens: ['saudi'] },
+                 { kind: 'car', opens: ['china'] }, { kind: 'debt', opens: ['germany'] }, { kind: 'raid', opens: ['northkorea'] }, { kind: 'sanctions', opens: ['russia'] }],
+    france:     [{ kind: 'industry', opens: ['germany'] }, { kind: 'arms', opens: ['saudi'] }, { kind: 'veto', opens: ['usa', 'russia', 'china'] },
+                 { kind: 'migration', opens: ['italy', 'spain'] }, { kind: 'missile', opens: ['northkorea'] }],
+    germany:    [{ kind: 'gas', opens: ['russia'] }, { kind: 'car', opens: ['china'] }, { kind: 'debt', opens: ['italy', 'spain'] },
+                 { kind: 'tariffs', opens: ['usa'] }, { kind: 'industry', opens: ['france'] }, { kind: 'arms', opens: ['saudi'] }, { kind: 'sanctions', opens: ['northkorea'] }],
+    usa:        [{ kind: 'tariffs', opens: ['china'] }, { kind: 'oil', opens: ['saudi'] }, { kind: 'missile', opens: ['northkorea'] },
+                 { kind: 'tariffs', opens: ['germany', 'france', 'italy', 'spain'] }, { kind: 'sanctions', opens: ['russia'] }],
+    russia:     [{ kind: 'gas', opens: ['germany', 'italy', 'spain'] }, { kind: 'alliance', opens: ['china', 'northkorea'] }, { kind: 'oil', opens: ['saudi'] },
+                 { kind: 'sanctions', opens: ['usa', 'france'] }],
+    china:      [{ kind: 'tariffs', opens: ['usa'] }, { kind: 'alliance', opens: ['northkorea', 'russia'] }, { kind: 'car', opens: ['germany', 'spain', 'france'] },
+                 { kind: 'port', opens: ['italy'] }, { kind: 'oil', opens: ['saudi'] }],
+    saudi:      [{ kind: 'oil', opens: ['usa', 'russia'] }, { kind: 'arms', opens: ['france', 'spain'] }, { kind: 'expo', opens: ['italy'] },
+                 { kind: 'oil', opens: ['china'] }, { kind: 'arms', opens: ['germany'] }, { kind: 'missile', opens: ['northkorea'] }],
+    northkorea: [{ kind: 'alliance', opens: ['china', 'russia'] }, { kind: 'missile', opens: ['usa'] }, { kind: 'veto', opens: ['france'] },
+                 { kind: 'raid', opens: ['spain'] }, { kind: 'sanctions', opens: ['germany', 'italy'] }, { kind: 'oil', opens: ['saudi'] }],
+  };
+  // the twists: can come after any win
+  const TWISTS = [
+    { kind: 'sanctions', rule: 'forced', pick: () => ['russia', 'northkorea'] },
+    { kind: 'ballot', rule: 'election', likes: ['spain'] },
+    { kind: 'summit', rule: 'free' },
+    { kind: 'alliance', rule: 'alliance' },
+    { kind: 'roulette', rule: 'roulette' },
   ];
   const ALLIES = [['russia', 'northkorea'], ['russia', 'china'], ['china', 'northkorea'], ['usa', 'saudi'], ['france', 'germany'], ['italy', 'spain'], ['usa', 'germany']];
   const left = () => COUNTRIES.filter(id => id !== S.me && !S.world.conquests[id]);
-  // what a scenario would open, given the world right now (empty = cannot happen)
   function outcome(sc, beaten) {
     const free = left();
-    if (sc.rule === 'forced' || sc.rule === 'choice') { const o = sc.pick(beaten).filter(id => free.includes(id)); return sc.rule === 'forced' ? o.slice(0, 1) : o; }
+    if (sc.opens) return sc.opens.filter(id => free.includes(id));
+    if (sc.rule === 'forced') return sc.pick(beaten).filter(id => free.includes(id)).slice(0, 1);
     if (sc.rule === 'free') return free;
     if (sc.rule === 'roulette') return free.length ? [free[Math.floor(Math.random() * free.length)]] : [];
     if (sc.rule === 'election') { const mine = Object.keys(S.world.conquests).filter(id => id !== beaten && id !== S.me); return mine.length ? [mine[Math.floor(Math.random() * mine.length)]] : []; }
-    if (sc.rule === 'alliance') { const pairs = ALLIES.filter(([a, b]) => free.includes(a) && free.includes(b)); if (!pairs.length) return []; const p = pairs[Math.floor(Math.random() * pairs.length)]; return p; }
+    if (sc.rule === 'alliance') { const pairs = ALLIES.filter(([a, b]) => free.includes(a) && free.includes(b)); return pairs.length ? pairs[Math.floor(Math.random() * pairs.length)] : []; }
     return [];
   }
   function scenarioAfter(beaten) {
-    const linked = SCENARIOS.filter(sc => sc.when && sc.when.includes(beaten)).map(sc => ({ sc, o: outcome(sc, beaten) })).filter(x => x.o.length);
-    const general = SCENARIOS.filter(sc => !sc.when).flatMap(sc => (sc.likes && sc.likes.includes(beaten) ? [sc, sc, sc] : [sc])).map(sc => ({ sc, o: outcome(sc, beaten) })).filter(x => x.o.length);
-    const pool = linked.length && Math.random() < .7 ? linked : general.length ? general : linked;
+    const stories = (STORIES[beaten] || []).map(sc => ({ sc, o: outcome(sc, beaten) })).filter(x => x.o.length);
+    const twists = TWISTS.flatMap(sc => (sc.likes && sc.likes.includes(beaten) ? [sc, sc, sc] : [sc])).map(sc => ({ sc, o: outcome(sc, beaten) })).filter(x => x.o.length);
+    const pool = stories.length && Math.random() < .75 ? stories : twists.length ? twists : stories;
     if (!pool.length) return { kind: 'summit', rule: 'free', open: left() };
     const { sc, o } = pool[Math.floor(Math.random() * pool.length)];
-    return { kind: sc.kind, rule: sc.rule, open: o };
+    return { kind: sc.kind, rule: sc.rule || (o.length === 1 ? 'forced' : 'choice'), open: o };
   }
   // apply the card to the world
   function applyScenario(c) {
