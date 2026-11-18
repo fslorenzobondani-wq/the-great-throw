@@ -7,7 +7,7 @@
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; touch-action: none; }
   #stage { position: absolute; inset: 0; margin: auto; aspect-ratio: 4 / 3; max-width: 100vw; max-height: 100vh; overflow: hidden; background: #000; border-radius: 2.5% / 3.3%; }
-  #live { position: absolute; inset: -8%; width: 116%; height: 116%; border: 0; pointer-events: none; display: none;
+  #live { position: absolute; left: -8%; top: -8%; width: 116%; height: 116%; border: 0; pointer-events: none;
           filter: saturate(1.5) contrast(1.2) brightness(.92); }
   #screen { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; }
   #fx { position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
@@ -25,7 +25,7 @@
 </head>
 <body>
 <div id="stage">
-  <iframe id="live" allow="autoplay; encrypted-media"></iframe>
+  <div id="live"></div>
   <canvas id="screen" width="320" height="240"></canvas>
   <div id="qr"></div>
   <audio id="music" src="audio/soundtrack.mp3" loop preload="auto"></audio>
@@ -41,15 +41,15 @@
    Laptop = target screen (index.html) · Phone = controller (?role=phone&id=XXXX)
    ============================================================ */
 
-// live: ID of a YouTube live stream of the square (the part after "watch?v=").
-// Empty = fallback city synced to the capital's real time and weather.
+// live: YouTube live streams of the square (the part after "watch?v="), tried in order until one plays.
+// None working = fallback city synced to the capital's real time and weather. Live IDs change: update them here.
 const NATIONS = {
-  italy:      { live: '', lat: 41.90, lon: 12.50,  tz: 'Europe/Rome' },
-  spain:      { live: '', lat: 40.42, lon: -3.70,  tz: 'Europe/Madrid' },
-  france:     { live: '', lat: 48.86, lon: 2.35,   tz: 'Europe/Paris' },
-  germany:    { live: '', lat: 52.52, lon: 13.40,  tz: 'Europe/Berlin' },
-  usa:        { live: '', lat: 38.89, lon: -77.03, tz: 'America/New_York' },
-  russia:     { live: '', lat: 55.75, lon: 37.62,  tz: 'Europe/Moscow' },
+  italy:      { live: ['j39vIidsIJI', 'M5xgQDXxL70', 'xLa7N7hWnpI', '89d3tEaqImM'], lat: 41.90, lon: 12.50,  tz: 'Europe/Rome' },
+  spain:      { live: ['b6j7y_GuZVI', '9O6X8y3lyfg'], lat: 40.42, lon: -3.70,  tz: 'Europe/Madrid' },
+  france:     { live: ['YkKGantlWH0', 'pF8CKcwPQwE'], lat: 48.86, lon: 2.35,   tz: 'Europe/Paris' },
+  germany:    { live: ['4Xg-wkPazp4', 'IRqboacDNFg', 'bImfEZie92U'], lat: 52.52, lon: 13.40,  tz: 'Europe/Berlin' },
+  usa:        { live: ['5p_KGD4fJZs', 'lHkebfwmC4U'], lat: 38.89, lon: -77.03, tz: 'America/New_York' },
+  russia:     { live: ['TMtFtwm5-tk'], lat: 55.75, lon: 37.62,  tz: 'Europe/Moscow' },
   china:      { live: '', lat: 39.90, lon: 116.40, tz: 'Asia/Shanghai' },
   saudi:      { live: '', lat: 24.71, lon: 46.68,  tz: 'Asia/Riyadh' },
   northkorea: { live: '', lat: 39.02, lon: 125.75, tz: 'Asia/Pyongyang' },
@@ -228,13 +228,37 @@ function startTarget() {
   };
 
   // --- live camera of the square
-  let currentLive = null;
-  function live(id) {
-    const f = document.getElementById('live'), v = id && NATIONS[id].live;
-    if (v === currentLive) return; currentLive = v;
-    if (v) { f.src = `https://www.youtube.com/embed/${v}?autoplay=1&mute=1&controls=0&playsinline=1&loop=1`; f.style.display = 'block'; }
-    else { f.src = 'about:blank'; f.style.display = 'none'; }
-  }
+  // --- live camera of the square: try each candidate until one plays; otherwise the drawn city
+  const Live = (() => {
+    let yt = null, ready = false, want = null, list = [], idx = 0, playing = false, timer = null;
+    const dead = {};
+    window.onYouTubeIframeAPIReady = () => {
+      yt = new YT.Player('live', { playerVars: { autoplay: 1, mute: 1, controls: 0, disablekb: 1, playsinline: 1, rel: 0, modestbranding: 1, iv_load_policy: 3 },
+        events: {
+          onReady: () => { ready = true; yt.mute(); if (want) tryNext(true); },
+          onStateChange: e => { playing = e.data === 1; if (playing) clearTimeout(timer); },
+          onError: () => tryNext(),
+        } });
+    };
+    const sc = document.createElement('script'); sc.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(sc);
+    function tryNext(first) {
+      if (!ready || !want) return;
+      if (!first) idx++;
+      playing = false; clearTimeout(timer);
+      if (idx >= list.length) { dead[want] = true; yt.stopVideo(); return; }
+      yt.loadVideoById(list[idx]); yt.mute();
+      timer = setTimeout(() => { if (!playing) tryNext(); }, 9000);   // not playing after 9 s: next candidate
+    }
+    function show(id) {
+      if (id === want) return;
+      want = id; playing = false; idx = 0; list = (id && NATIONS[id].live) || [];
+      if (!id || !list.length || dead[id]) { want = id; if (ready) yt.stopVideo(); return; }
+      tryNext(true);
+    }
+    return { show, isPlaying: id => playing && want === id };
+  })();
+  const live = id => Live.show(id);
+
 
   // --- phone controller (PeerJS)
   const code = String(Math.floor(1000 + Math.random() * 9000));
@@ -539,7 +563,7 @@ function startTarget() {
   /* ---------------- drawing ---------------- */
   function background(id) {
     live(id);
-    if (id && NATIONS[id].live) { g.clearRect(0, 0, W, H); return; }
+    if (id && Live.isPlaying(id)) { g.clearRect(0, 0, W, H); return; }
     const h = clock(id || 'italy'), m = S.weather[id] || { clouds: 30, rain: 0 };
     const day = h >= 7 && h < 18, dusk = (h >= 17 && h < 20) || (h >= 6 && h < 8);
     const a = day ? [70, 130, 220] : dusk ? [210, 110, 90] : [12, 16, 48], b = day ? [170, 210, 240] : dusk ? [245, 180, 110] : [40, 32, 80];
@@ -703,7 +727,7 @@ function startTarget() {
       return;
     }
     if (sc === 'title') {
-      background('italy'); taskbar();
+      background(null); taskbar(); // drawn skyline on the title; live squares only in the duels
       logo();
       if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#fff'; g.beginPath(); g.moveTo(153, 204); g.lineTo(153, 218); g.lineTo(167, 211); g.fill(); }
       return;
