@@ -7,7 +7,7 @@
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; touch-action: none; }
   #stage { position: absolute; inset: 0; margin: auto; aspect-ratio: 4 / 3; max-width: 100vw; max-height: 100vh; overflow: hidden; background: #000; border-radius: 2.5% / 3.3%; }
-  #live { position: absolute; left: -8%; top: -8%; width: 116%; height: 116%; border: 0; pointer-events: none;
+  #live { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; visibility: hidden;
           filter: saturate(1.5) contrast(1.2) brightness(.92); }
   #screen { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; }
   #fx { position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
@@ -25,7 +25,7 @@
 </head>
 <body>
 <div id="stage">
-  <div id="live"></div>
+  <video id="live" muted loop playsinline autoplay preload="auto"></video>
   <canvas id="screen" width="320" height="240"></canvas>
   <div id="qr"></div>
   <audio id="music" src="audio/soundtrack.mp3" loop preload="auto"></audio>
@@ -41,18 +41,18 @@
    Laptop = target screen (index.html) · Phone = controller (?role=phone&id=XXXX)
    ============================================================ */
 
-// live: YouTube live streams of the square (the part after "watch?v="), tried in order until one plays.
-// None working = fallback city synced to the capital's real time and weather. Live IDs change: update them here.
+// video: a free-licence video of the capital (Wikimedia Commons, credits in README), smaller versions first.
+// None loading = fallback city. Real time stays: local hour tints the video (night / dusk), real rain is drawn on top.
 const NATIONS = {
-  italy:      { live: ['j39vIidsIJI', 'M5xgQDXxL70', 'xLa7N7hWnpI', '89d3tEaqImM'], lat: 41.90, lon: 12.50,  tz: 'Europe/Rome' },
-  spain:      { live: ['b6j7y_GuZVI', '9O6X8y3lyfg'], lat: 40.42, lon: -3.70,  tz: 'Europe/Madrid' },
-  france:     { live: ['YkKGantlWH0', 'pF8CKcwPQwE'], lat: 48.86, lon: 2.35,   tz: 'Europe/Paris' },
-  germany:    { live: ['4Xg-wkPazp4', 'IRqboacDNFg', 'bImfEZie92U'], lat: 52.52, lon: 13.40,  tz: 'Europe/Berlin' },
-  usa:        { live: ['5p_KGD4fJZs', 'lHkebfwmC4U'], lat: 38.89, lon: -77.03, tz: 'America/New_York' },
-  russia:     { live: ['TMtFtwm5-tk'], lat: 55.75, lon: 37.62,  tz: 'Europe/Moscow' },
-  china:      { live: '', lat: 39.90, lon: 116.40, tz: 'Asia/Shanghai' },
-  saudi:      { live: '', lat: 24.71, lon: 46.68,  tz: 'Asia/Riyadh' },
-  northkorea: { live: '', lat: 39.02, lon: 125.75, tz: 'Asia/Pyongyang' },
+  italy:      { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/a/a8/Fontaine_de_Trevi.webm/Fontaine_de_Trevi.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/a/a8/Fontaine_de_Trevi.webm/Fontaine_de_Trevi.webm.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/a/a8/Fontaine_de_Trevi.webm'], lat: 41.90, lon: 12.50,  tz: 'Europe/Rome' },
+  spain:      { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/0/07/Puerta_del_Sol%2C_2012.webm/Puerta_del_Sol%2C_2012.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/0/07/Puerta_del_Sol%2C_2012.webm/Puerta_del_Sol%2C_2012.webm.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/0/07/Puerta_del_Sol%2C_2012.webm'], lat: 40.42, lon: -3.70,  tz: 'Europe/Madrid' },
+  france:     { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/1/12/Eiffel_tower_141853_1.webm/Eiffel_tower_141853_1.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/1/12/Eiffel_tower_141853_1.webm/Eiffel_tower_141853_1.webm.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/1/12/Eiffel_tower_141853_1.webm'], lat: 48.86, lon: 2.35,   tz: 'Europe/Paris' },
+  germany:    { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/2/2d/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/2/2d/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/2/2d/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm'], lat: 52.52, lon: 13.40,  tz: 'Europe/Berlin' },
+  usa:        { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/5/57/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/5/57/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/5/57/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm'], lat: 38.89, lon: -77.03, tz: 'America/New_York' },
+  russia:     { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/b/be/A_view_of_Red_Square_MVI_6782.ogv/A_view_of_Red_Square_MVI_6782.ogv.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/b/be/A_view_of_Red_Square_MVI_6782.ogv/A_view_of_Red_Square_MVI_6782.ogv.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/b/be/A_view_of_Red_Square_MVI_6782.ogv'], lat: 55.75, lon: 37.62,  tz: 'Europe/Moscow' },
+  china:      { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/f/fc/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/f/fc/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/f/fc/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm'], lat: 39.90, lon: 116.40, tz: 'Asia/Shanghai' },
+  saudi:      { video: [], lat: 24.71, lon: 46.68,  tz: 'Asia/Riyadh' },
+  northkorea: { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/4/47/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/4/47/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/4/47/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm'], lat: 39.02, lon: 125.75, tz: 'Asia/Pyongyang' },
 };
 const COUNTRIES = Object.keys(NATIONS);
 
@@ -228,32 +228,22 @@ function startTarget() {
   };
 
   // --- live camera of the square
-  // --- live camera of the square: try each candidate until one plays; otherwise the drawn city
+  // --- video of the capital: try each source until one plays; otherwise the drawn city
   const Live = (() => {
-    let yt = null, ready = false, want = null, list = [], idx = 0, playing = false, timer = null;
-    const dead = {};
-    window.onYouTubeIframeAPIReady = () => {
-      yt = new YT.Player('live', { playerVars: { autoplay: 1, mute: 1, controls: 0, disablekb: 1, playsinline: 1, rel: 0, modestbranding: 1, iv_load_policy: 3 },
-        events: {
-          onReady: () => { ready = true; yt.mute(); if (want) tryNext(true); },
-          onStateChange: e => { playing = e.data === 1; if (playing) clearTimeout(timer); },
-          onError: () => tryNext(),
-        } });
-    };
-    const sc = document.createElement('script'); sc.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(sc);
-    function tryNext(first) {
-      if (!ready || !want) return;
-      if (!first) idx++;
-      playing = false; clearTimeout(timer);
-      if (idx >= list.length) { dead[want] = true; yt.stopVideo(); return; }
-      yt.loadVideoById(list[idx]); yt.mute();
-      timer = setTimeout(() => { if (!playing) tryNext(); }, 9000);   // not playing after 9 s: next candidate
+    const v = document.getElementById('live'); v.muted = true;
+    let want = null, list = [], idx = 0, playing = false; const dead = {};
+    v.addEventListener('playing', () => { playing = true; v.style.visibility = 'visible'; });
+    v.addEventListener('error', () => next());
+    function next() {
+      playing = false; v.style.visibility = 'hidden';
+      if (idx >= list.length) { if (want) dead[want] = true; v.removeAttribute('src'); return; }
+      v.src = list[idx++]; v.play().catch(() => {});
     }
     function show(id) {
       if (id === want) return;
-      want = id; playing = false; idx = 0; list = (id && NATIONS[id].live) || [];
-      if (!id || !list.length || dead[id]) { want = id; if (ready) yt.stopVideo(); return; }
-      tryNext(true);
+      want = id; idx = 0; list = (id && NATIONS[id].video) || [];
+      if (!id || !list.length || dead[id]) { playing = false; v.style.visibility = 'hidden'; v.pause(); return; }
+      next();
     }
     return { show, isPlaying: id => playing && want === id };
   })();
@@ -563,7 +553,14 @@ function startTarget() {
   /* ---------------- drawing ---------------- */
   function background(id) {
     live(id);
-    if (id && Live.isPlaying(id)) { g.clearRect(0, 0, W, H); return; }
+    if (id && Live.isPlaying(id)) {
+      g.clearRect(0, 0, W, H);
+      const hr = clock(id), wx = S.weather[id] || {};
+      if (hr < 6 || hr >= 20) { g.fillStyle = 'rgba(8,12,50,.5)'; g.fillRect(0, 0, W, H); }          // it is night there now
+      else if (hr < 8 || hr >= 17) { g.fillStyle = 'rgba(255,110,60,.18)'; g.fillRect(0, 0, W, H); } // dawn or dusk there now
+      if (wx.rain > 0) { g.fillStyle = 'rgba(190,210,255,.5)'; for (let i = 0; i < 90; i++) g.fillRect((i * 53 + S.t * 30) % W, (i * 31 + S.t * 230) % H, 1, 4); } // it is raining there now
+      return;
+    }
     const h = clock(id || 'italy'), m = S.weather[id] || { clouds: 30, rain: 0 };
     const day = h >= 7 && h < 18, dusk = (h >= 17 && h < 20) || (h >= 6 && h < 8);
     const a = day ? [70, 130, 220] : dusk ? [210, 110, 90] : [12, 16, 48], b = day ? [170, 210, 240] : dusk ? [245, 180, 110] : [40, 32, 80];
