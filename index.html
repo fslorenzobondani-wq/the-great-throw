@@ -18,7 +18,7 @@
   #qr { position: absolute; right: 2%; bottom: 9%; width: 16%; background: #fff; padding: .8%; display: none; image-rendering: pixelated; z-index: 4; }
   #qr img { width: 100%; display: block; }
 
-  #qr.pair { right: auto; bottom: auto; left: 50%; top: 50%; width: 30%; transform: translate(-50%, -46%); padding: 1.2%; }
+  #qr.pair { right: auto; bottom: auto; left: 33%; top: 47%; width: 26%; transform: translate(-50%, -50%); padding: 1.2%; }
   #pad { position: absolute; inset: 0; display: none; background: #111; }
   #pad canvas { width: 100%; height: 100%; }
 </style>
@@ -63,7 +63,7 @@ const REACTIONS = {
   china: ['usa', 'northkorea'],    saudi: ['usa', 'france'],        northkorea: ['russia', 'china'],
 };
 
-const CONFIG = { flags: 7, sectors: 6, radius: 84 };
+const CONFIG = { flags: 7, sectors: 6, radius: 84, camMinPixels: 10, flickSpeed: 2.6 }; // flickSpeed: screen-widths per second
 
 // Each nation's currency. The coin of the day = how much the currency moved against gold since yesterday.
 const CURRENCY = {
@@ -240,13 +240,11 @@ function startTarget() {
   try {
     const peer = new Peer('greatthrow-' + code);
     peer.on('open', () => {
-      const url = location.origin + location.pathname + '?role=phone&id=' + code;
-      const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
-      document.getElementById('qr').innerHTML = qr.createImgTag(4, 0); updateQR(); console.log('Phone:', url);
+      S.peerOk = true; updateQR();
     });
     peer.on('connection', conn => {
       S.conn = conn;
-      conn.on('open', () => { S.phone = true; updateQR(); sendFlag(); if (S.scene === 'pair') coins(); });
+      conn.on('open', () => { S.phone = true; updateQR(); sendFlag(); });
       conn.on('data', d => {
         S.signal = 1; // tray phone icon flashes: a message arrived
         if (d.type === 'tap') press();
@@ -261,7 +259,62 @@ function startTarget() {
     });
   } catch (e) { console.warn('PeerJS unavailable: single-player mode'); }
   function sendFlag() { try { if (S.conn && S.phone && S.me) S.conn.send({ type: 'flag', id: S.me }); } catch (e) {} }
-  function updateQR() { const b = document.getElementById('qr'); const on = S.scene === 'pair' && !S.phone && b.innerHTML; b.style.display = on ? 'block' : 'none'; b.classList.toggle('pair', !!on); }
+  function makeQR() {
+    const b = document.getElementById('qr'), url = location.origin + location.pathname + '?role=phone&flag=' + S.me + '&id=' + code;
+    if (b.dataset.url === url || typeof qrcode === 'undefined') return;
+    const qr = qrcode(0, 'M'); qr.addData(url); qr.make(); b.innerHTML = qr.createImgTag(4, 0); b.dataset.url = url; console.log('Phone:', url);
+  }
+  function updateQR() { const b = document.getElementById('qr'); if (S.scene === 'pair') makeQR(); const on = S.scene === 'pair' && b.innerHTML; b.style.display = on ? 'block' : 'none'; b.classList.toggle('pair', !!on); }
+
+  // --- WEBCAM TRACKER: finds the pink phone screen, aims with it, throws on a sharp flick
+  const Cam = (() => {
+    const v = document.createElement('video'); v.muted = true; v.playsInline = true;
+    const c = document.createElement('canvas'); c.width = 80; c.height = 60; const cg = c.getContext('2d', { willReadFrequently: true });
+    const T = { on: false, found: false, x: .5, y: .5, n: 0, seen: 0, hist: [], lastThrow: 0, speed: 0, wasFast: 0 };
+    T.video = v;
+    T.start = () => {
+      if (T.on || !navigator.mediaDevices) return;
+      T.on = 'asking';
+      navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240, facingMode: 'user' } })
+        .then(st => { v.srcObject = st; v.play(); T.on = true; })
+        .catch(() => { T.on = false; T.denied = true; });
+    };
+    T.tick = (dt, now) => {
+      if (T.on !== true || v.readyState < 2) return;
+      cg.drawImage(v, 0, 0, 80, 60);
+      const d = cg.getImageData(0, 0, 80, 60).data;
+      let sx = 0, sy = 0, n = 0;
+      for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+        const r = d[i], gg = d[i + 1], b = d[i + 2];
+        if (r > 130 && b > 100 && r - gg > 70 && b - gg > 40) { sx += p % 80; sy += (p / 80) | 0; n++; }   // pink
+      }
+      const was = T.found;
+      T.found = n >= CONFIG.camMinPixels; T.n = n;
+      if (T.found) {
+        const nx = 1 - sx / n / 80, ny = sy / n / 60;                                    // mirrored, like a mirror
+        const dx = nx - T.x, dy = ny - T.y; T.speed = Math.hypot(dx, dy) / Math.max(dt, .001);
+        T.x += dx * .5; T.y += dy * .5; T.seen += dt;
+        T.hist.push({ t: now, x: T.x, y: T.y }); while (T.hist.length && now - T.hist[0].t > .6) T.hist.shift();
+        if (T.speed > CONFIG.flickSpeed) T.wasFast = now;
+      } else T.seen = 0;
+      // a throw = a sharp flick (or the phone vanishing right after a fast move, motion blur)
+      const flick = (T.found && T.speed > CONFIG.flickSpeed) || (was && !T.found && now - T.wasFast < .15);
+      if (flick && now - T.lastThrow > .7 && T.hist.length) {
+        T.lastThrow = now;
+        const aimAt = T.hist.find(h => now - h.t < .35) || T.hist[0];                    // where you were aiming just before the flick
+        if (T.onThrow) T.onThrow(aimAt.x, aimAt.y);
+      }
+    };
+    return T;
+  })();
+  const camAim = (x, y) => { const r = CONFIG.radius * .95, k = v => Math.max(0, Math.min(1, (v - .2) / .6)); return { x: CX + (k(x) - .5) * 2.2 * r, y: CY + (k(y) - .5) * 2.2 * r }; };
+  Cam.onThrow = (x, y) => { S.signal = 1; if (S.scene === 'duel') { const a = camAim(x, y); throwFlag(a.x, a.y); } };
+  function camPreview(x, y, w, h) {
+    if (Cam.on !== true) return;
+    g.save(); g.translate(x + w, y); g.scale(-1, 1); g.drawImage(Cam.video, 0, 0, w, h); g.restore();   // mirrored
+    g.strokeStyle = Cam.found ? '#7dff9a' : '#ff5a4a'; g.lineWidth = 2; g.strokeRect(x, y, w, h);
+    if (Cam.found) { g.fillStyle = '#ff2bd6'; g.fillRect(x + Cam.x * w - 2, y + Cam.y * h - 2, 4, 4); }
+  }
 
   // --- laptop input
   const pos = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
@@ -282,14 +335,14 @@ function startTarget() {
   });
   function move(d) { if (S.scene === 'pickMe' || S.scene === 'pickRival') S.sel = (S.sel + d + 9) % 9; }
 
-  function go(sc) { S.scene = sc; S.t = 0; updateQR(); if (sc === 'crash') Music.crash(); }
+  function go(sc) { S.scene = sc; S.t = 0; if (sc === 'pair') Cam.start(); updateQR(); if (sc === 'crash') Music.crash(); }
   function press() {
     const sc = S.scene;
     if (sc === 'off') { Modem.unlock(); go('splash'); }
     else if (sc === 'splash' || sc === 'dial') { Modem.stop(); Music.start(); go('title'); } // skip the intro
     else if (sc === 'title') { Music.start(); S.sel = 0; go('pickMe'); }
     else if (sc === 'pickMe') { S.me = COUNTRIES[S.sel]; S.sel = S.world.reacting.length ? COUNTRIES.indexOf(S.world.reacting[0]) : 0; go('pickRival'); }
-    else if (sc === 'pickRival') { if (COUNTRIES[S.sel] === S.me) return; S.rival = COUNTRIES[S.sel]; S.phone ? coins() : go('pair'); sendFlag(); }
+    else if (sc === 'pickRival') { if (COUNTRIES[S.sel] === S.me) return; S.rival = COUNTRIES[S.sel]; go('pair'); sendFlag(); }
     else if (sc === 'pair') coins(); // no phone: play solo with the mouse
     else if (sc === 'coins' && S.t > 2.2) duel();
     else if (sc === 'crash' && S.t > 1.2) duel();
@@ -334,7 +387,9 @@ function startTarget() {
   }
 
   function update(dt) {
-    S.t += dt;
+    S.t += dt; S.clock = (S.clock || 0) + dt;
+    Cam.tick(dt, S.clock);
+    if (S.scene === 'pair' && Cam.seen > 1) coins();
     const sc = S.scene, prog = S.loaded / 10;
     if (sc === 'splash' && ((S.t > 2.2 && prog >= 1) || S.t > 6)) { Modem.play(); go('dial'); }
     else if (sc === 'dial' && ((S.t > 3 && S.dataDone >= 10) || S.t > 7)) { Modem.stop(); Music.start(); go('title'); }
@@ -537,14 +592,19 @@ function startTarget() {
     if (sc === 'pair') {
       desktop(null); windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, S.me);
       g.fillStyle = 'rgba(10,20,60,.85)'; g.fillRect(WIN.x + 2, WIN.y + 12, WIN.w - 4, WIN.h - 14);
-      // phone icon showing your flag, with the pink tracking frame
-      const px = WIN.x + 14, py = 86;
-      g.fillStyle = '#222'; g.fillRect(px, py, 30, 54); g.fillStyle = '#ff2bd6'; g.fillRect(px + 2, py + 4, 26, 44);
-      flag(g, S.me, px + 5, py + 9, 20, 34);
-      // blinking dots towards the QR code
-      for (let i = 0; i < 3; i++) if ((Math.floor(S.t * 4) + i) % 3) { g.fillStyle = '#ffe680'; g.fillRect(px + 36 + i * 5, py + 26, 3, 3); }
+      // 1. scan the QR (DOM, left)   2. show the pink phone to the webcam (right)
+      g.fillStyle = '#ffe680'; g.font = '900 12px "Arial Black", sans-serif'; g.textAlign = 'center';
+      number(1, 106, 44, '#ffe680'); number(2, 214, 44, '#ffe680');
+      if (Cam.on === true) camPreview(170, 72, 88, 66);
+      else { g.strokeStyle = '#a9c8ff'; g.strokeRect(170.5, 72.5, 88, 66); g.fillStyle = Cam.denied ? '#ff5a4a' : '#a9c8ff'; g.fillRect(204, 98, 20, 14); g.fillRect(224, 101, 6, 8); }
+      // phone icon held up towards the camera
+      const px = 199, py = 146 + Math.round(Math.sin(S.t * 3) * 2);
+      g.fillStyle = '#222'; g.fillRect(px, py, 30, 52); g.fillStyle = '#ff2bd6'; g.fillRect(px + 2, py + 3, 26, 46);
+      flag(g, S.me, px + 4, py + 18, 22, 15);
+      // progress: the phone is being seen
+      for (let i = 0; i < 8; i++) { g.fillStyle = i < Cam.seen * 8 ? '#7dff9a' : 'rgba(255,255,255,.2)'; g.fillRect(170 + i * 11, 142, 9, 3); }
       // solo option: blinking mouse icon (click to play without a phone)
-      if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#fff'; g.fillRect(WIN.x + WIN.w - 26, 190, 10, 14); g.fillStyle = '#1f4fb8'; g.fillRect(WIN.x + WIN.w - 22, 190, 2, 5); }
+      if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#fff'; g.fillRect(WIN.x + 10, 196, 10, 14); g.fillStyle = '#1f4fb8'; g.fillRect(WIN.x + 14, 196, 2, 5); }
       return;
     }
     if (sc === 'pickMe' || sc === 'pickRival') {
@@ -580,6 +640,8 @@ function startTarget() {
       S.flights.forEach(f => { const t = Math.min(1, f.t), x = CX + (f.tx - CX) * t, y = 250 + (f.ty - 250) * t - Math.sin(t * Math.PI) * 40; pole(x, y, S.me, 2.2 - t * 1.2, S.t); });
       (S.falling || []).forEach(p => { p.v += .25; p.y += p.v; pole(p.x, p.y, S.me, 1, S.t); });
       S.falling = (S.falling || []).filter(p => p.y < 240);
+      if (sc === 'duel' && Cam.found) S.aim = camAim(Cam.x, Cam.y);
+      if (sc === 'duel') camPreview(WIN.x + 6, WIN.y + 16, 48, 36);
       if (sc === 'duel' && S.aim) { const a = S.aim, r = 7 + Math.sin(S.t * 10); g.strokeStyle = '#ff2bd6'; g.lineWidth = 2; g.beginPath(); g.arc(a.x, a.y, r, 0, Math.PI * 2); g.stroke(); g.fillStyle = '#ff2bd6'; g.fillRect(a.x - 1, a.y - r - 4, 2, 4); g.fillRect(a.x - 1, a.y + r, 2, 4); g.fillRect(a.x - r - 4, a.y - 1, 4, 2); g.fillRect(a.x + r, a.y - 1, 4, 2); }
       if (sc === 'duel') hud(); else crash();
       return;
@@ -647,8 +709,9 @@ function startPhone() {
   const pad = document.getElementById('pad'); pad.style.display = 'block';
   const cv = document.getElementById('padc'), g = cv.getContext('2d');
   let conn = null, connected = false, start = null, country = 0, trail = 0;
-  const id = new URLSearchParams(location.search).get('id');
-  function size() { cv.width = 160; cv.height = Math.round(160 * innerHeight / innerWidth); g.imageSmoothingEnabled = false; }
+  const id = new URLSearchParams(location.search).get('id'), fromLink = new URLSearchParams(location.search).get('flag');
+  if (COUNTRIES.includes(fromLink)) country = COUNTRIES.indexOf(fromLink);
+  function size() { cv.width = Math.round(innerWidth * (devicePixelRatio || 1)); cv.height = Math.round(innerHeight * (devicePixelRatio || 1)); g.imageSmoothingEnabled = false; }
   size(); addEventListener('resize', size);
   try { const peer = new Peer(); peer.on('open', () => { conn = peer.connect('greatthrow-' + id); conn.on('open', () => connected = true); conn.on('close', () => connected = false); conn.on('data', d => { if (d.type === 'flag' && COUNTRIES.includes(d.id)) country = COUNTRIES.indexOf(d.id); }); }); } catch (e) {}
   const send = d => { if (conn && connected) conn.send(d); };
@@ -664,11 +727,13 @@ function startPhone() {
   ['touchstart', 'touchmove'].forEach(t => cv.addEventListener(t, e => e.preventDefault(), { passive: false })); // the page never scrolls
   (function draw() {
     const W = cv.width, H = cv.height;
-    // full-screen flag inside a thick pink frame: the laptop webcam will track the frame
+    // pink screen (what the webcam tracks) with the flag in its real proportions, centred
     g.fillStyle = trail > 0 ? '#ffffff' : '#ff2bd6'; g.fillRect(0, 0, W, H);
-    const m = Math.round(W * .1); g.fillStyle = '#000'; g.fillRect(m - 1, m - 1, W - 2 * m + 2, H - 2 * m + 2);
-    flag(g, COUNTRIES[country], m, m, W - 2 * m, H - 2 * m);
-    g.fillStyle = connected ? '#3c3' : '#c33'; g.fillRect(W - 9, 3, 5, 5);
+    const RATIO = { germany: 5 / 3, usa: 1.9, northkorea: 2 }, ratio = RATIO[COUNTRIES[country]] || 1.5;
+    const fw = Math.round(W * .8), fh = Math.round(fw / ratio), fx = Math.round((W - fw) / 2), fy = Math.round((H - fh) / 2);
+    g.fillStyle = '#000'; g.fillRect(fx - 3, fy - 3, fw + 6, fh + 6);
+    flag(g, COUNTRIES[country], fx, fy, fw, fh);
+    const dot = Math.round(W * .03); g.fillStyle = connected ? '#3c3' : '#c33'; g.fillRect(W - dot * 2, dot, dot, dot);
     trail = Math.max(0, trail - .08);
     requestAnimationFrame(draw);
   })();
