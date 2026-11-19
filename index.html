@@ -276,7 +276,7 @@ function startTarget() {
   } catch (e) { console.warn('PeerJS unavailable: single-player mode'); }
   function sendFlag() { try { if (S.conn && S.phone && S.me) S.conn.send({ type: 'flag', id: S.world.conquests[S.me] || S.me }); } catch (e) {} }
   function makeQR() {
-    const b = document.getElementById('qr'), url = location.origin + location.pathname + '?role=phone&flag=' + S.me + '&id=' + code;
+    const b = document.getElementById('qr'), url = location.origin + location.pathname + '?role=phone&flag=' + (S.me || COUNTRIES.find(id => owner(id) === 0) || 'italy') + '&id=' + code;
     if (b.dataset.url === url || typeof qrcode === 'undefined') return;
     const qr = qrcode(0, 'M'); qr.addData(url); qr.make(); b.innerHTML = qr.createImgTag(4, 0); b.dataset.url = url; console.log('Phone:', url);
   }
@@ -336,7 +336,7 @@ function startTarget() {
     return T;
   })();
   const camAim = (x, y) => { const r = CONFIG.radius * .95, k = v => Math.max(0, Math.min(1, (v - .2) / .6)), dx = (k(x) - .5) * 2.2 * r, dy = (k(y) - .5) * 2.2 * r, m = Math.min(1, r / Math.max(1e-6, Math.hypot(dx, dy))); return { x: CX + dx * m, y: CY + dy * m }; }; // always on the wheel
-  Cam.onThrow = (x, y) => { S.signal = 1; if (S.scene === 'duel') { const a = camAim(x, y); throwFlag(a.x, a.y); } else if (S.t > 1) press(); }; // outside the duel a throw = OK
+  Cam.onThrow = (x, y) => { S.signal = 1; if (S.scene === 'duel') { const a = camAim(x, y); throwFlag(a.x, a.y); } else if (S.t > 1 && S.scene !== 'pair') press(); }; // outside the duel a throw = OK
   // backup triggers: a tap on the phone or the space bar throws at the current aim
   function throwAtAim() { const a = Cam.found ? camAim(Cam.x, Cam.y) : S.aim || { x: CX, y: CY - 70 }; throwFlag(a.x, a.y); Cam.power = 1; }
   function camPreview(x, y, w, h) {
@@ -471,6 +471,7 @@ function startTarget() {
     const p = pos(e);
     if (p.y > 226 && p.x > 252 && p.x < 280) return Music.toggleMute();
     if (S.scene === 'pair' && p.x >= 170 && p.x <= 258 && p.y >= 72 && p.y <= 138) return Cam.calibrate((p.x - 170) / 88, (p.y - 72) / 66);
+    if (S.scene === 'pair') { if (p.x < WIN.x + 30 && p.y > 188 && p.y < 216) go('win'); return; }   // only the mouse icon: play without a phone
     if (S.scene === 'duel') return throwFlag(p.x, p.y);
     if (S.scene === 'draft') {
       const i = Math.floor((p.x - 8) / 34);
@@ -484,6 +485,7 @@ function startTarget() {
     if (e.key === 'ArrowLeft') move(-1);
     if (e.key === ' ' && S.scene === 'duel') { e.preventDefault(); return throwAtAim(); }
     if (e.key === '[' || e.key === ']') { const k = e.key === ']' ? .8 : 1.25; CONFIG.flickSpeed *= k; CONFIG.growThrow = 1 + (CONFIG.growThrow - 1) * k; S.sensShow = 2; } // ] = more sensitive
+    if (e.key === 'Enter' && S.scene === 'pair') return go('win');   // laptop keyboard: play without a phone
     if (e.key === 'Enter' || e.key === ' ') press();
   });
   function move(d) {
@@ -507,7 +509,6 @@ function startTarget() {
       if (taken >= Math.floor(9 / S.n) * S.n) { S.scenario = scenarioAfter(null); S.last = null; Cam.on === true ? go('win') : go('pair'); }
       else { S.sel = 0; if (owner(COUNTRIES[0]) !== null) move(1); }
     }
-    else if (sc === 'pair') go('win'); // no phone: play with the mouse
     else if (sc === 'win' && S.t > 4) nextDuel();
     else if (sc === 'coins' && S.t > 1.5) duel();
     else if (sc === 'crash' && S.t > 3) endTurn();
@@ -583,7 +584,7 @@ function startTarget() {
   function update(dt) {
     S.t += dt; S.clock = (S.clock || 0) + dt;
     Cam.tick(dt, S.clock);
-    if (S.scene === 'pair' && Cam.seen > 1) go('win');
+    if (S.scene === 'pair') { S.pairOk = S.phone && Cam.seen > 1 ? (S.pairOk || 0) + dt : 0; if (S.pairOk > .8) go('win'); }   // both ticks green, then go
     const sc = S.scene, prog = S.loaded / 10;
     if (sc === 'splash' && ((S.t > 2.2 && prog >= 1) || S.t > 6)) { Modem.play(); go('dial'); }
     else if (sc === 'dial' && ((S.t > 3 && S.dataDone >= 10) || S.t > 7)) { Modem.stop(); Music.start(); go('title'); }
@@ -824,6 +825,9 @@ function startTarget() {
       const px = 199, py = 146 + Math.round(Math.sin(S.t * 3) * 2);
       g.fillStyle = '#222'; g.fillRect(px, py, 30, 52); g.fillStyle = '#ff2bd6'; g.fillRect(px + 2, py + 3, 26, 46);
       flag(g, COUNTRIES.find(id => owner(id) === 0) || 'italy', px + 4, py + 18, 22, 15);
+      // ticks: 1 = phone connected, 2 = webcam sees it
+      const tick = (x, y, ok) => { g.fillStyle = ok ? '#2f9e3a' : 'rgba(255,255,255,.15)'; g.fillRect(x - 7, y - 7, 14, 14); if (ok) { g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); g.moveTo(x - 4, y); g.lineTo(x - 1, y + 3); g.lineTo(x + 4, y - 3); g.stroke(); } else if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#ffe680'; g.fillRect(x - 1, y - 1, 2, 2); } };
+      tick(124, 41, S.phone); tick(232, 41, S.phone && Cam.seen > 1);
       // progress: the phone is being seen
       for (let i = 0; i < 8; i++) { g.fillStyle = i < Cam.seen * 8 ? '#7dff9a' : 'rgba(255,255,255,.2)'; g.fillRect(170 + i * 11, 142, 9, 3); }
       // solo option: blinking mouse icon (click to play without a phone)
