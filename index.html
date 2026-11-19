@@ -374,6 +374,7 @@ function startTarget() {
       case 'port': p(0, 12, 16, 4, '#245edb'); p(2, 8, 12, 4, '#c0392b'); p(4, 5, 3, 3, '#2f9e3a'); p(8, 5, 3, 3, '#ffd34a'); p(13, 1, 1, 8, '#888'); p(10, 1, 4, 1, '#888'); break; // port: ship + crane
       case 'base': p(1, 13, 14, 2, '#5a6b3a'); p(6, 4, 4, 8, '#888'); p(2, 7, 12, 2, '#888'); p(5, 11, 6, 1, '#888'); p(7, 1, 2, 3, '#888'); break;                // air base: jet
       case 'raid': p(4, 1, 8, 14, '#8a5a2b'); p(5, 2, 6, 12, '#6b4420'); p(9, 8, 1, 1, '#ffd34a'); p(1, 6, 3, 1, '#fff'); p(12, 6, 3, 1, '#fff'); p(0, 9, 3, 1, '#fff'); break; // door kicked in
+      case 'hack': p(1, 1, 14, 11, '#aab'); p(2, 2, 12, 9, '#000'); p(5, 3, 6, 4, '#3f3'); p(6, 7, 4, 2, '#3f3'); p(6, 4, 1, 2, '#000'); p(9, 4, 1, 2, '#000'); p(7, 8, 1, 1, '#000'); p(6, 12, 4, 2, '#888'); p(4, 14, 8, 1, '#888'); break; // cyber attack
       case 'missile': p(7, 1, 2, 2, '#c0392b'); p(6, 3, 4, 9, '#ccc'); p(4, 10, 2, 4, '#888'); p(10, 10, 2, 4, '#888'); p(7, 12, 2, 3, '#ffb000'); break;               // missile
     }
   }
@@ -409,14 +410,44 @@ function startTarget() {
     usa:        [{ kind: 'tariffs', opens: ['china'] }, { kind: 'oil', opens: ['saudi'] }, { kind: 'missile', opens: ['northkorea'] },
                  { kind: 'tariffs', opens: ['germany', 'france', 'italy', 'spain'] }, { kind: 'sanctions', opens: ['russia'] }],
     russia:     [{ kind: 'gas', opens: ['germany', 'italy', 'spain'] }, { kind: 'alliance', opens: ['china', 'northkorea'] }, { kind: 'oil', opens: ['saudi'] },
-                 { kind: 'sanctions', opens: ['usa', 'france'] }],
+                 { kind: 'sanctions', opens: ['usa', 'france'] }, { kind: 'hack', opens: ['usa', 'germany', 'france'] }],
     china:      [{ kind: 'tariffs', opens: ['usa'] }, { kind: 'alliance', opens: ['northkorea', 'russia'] }, { kind: 'car', opens: ['germany', 'spain', 'france'] },
-                 { kind: 'port', opens: ['italy'] }, { kind: 'oil', opens: ['saudi'] }],
+                 { kind: 'port', opens: ['italy'] }, { kind: 'oil', opens: ['saudi'] }, { kind: 'hack', opens: ['usa', 'germany'] }],
     saudi:      [{ kind: 'oil', opens: ['usa', 'russia'] }, { kind: 'arms', opens: ['france', 'spain'] }, { kind: 'expo', opens: ['italy'] },
                  { kind: 'oil', opens: ['china'] }, { kind: 'arms', opens: ['germany'] }, { kind: 'missile', opens: ['northkorea'] }],
     northkorea: [{ kind: 'alliance', opens: ['china', 'russia'] }, { kind: 'missile', opens: ['usa'] }, { kind: 'veto', opens: ['france'] },
-                 { kind: 'raid', opens: ['spain'] }, { kind: 'sanctions', opens: ['germany', 'italy'] }, { kind: 'oil', opens: ['saudi'] }],
+                 { kind: 'raid', opens: ['spain'] }, { kind: 'sanctions', opens: ['germany', 'italy'] }, { kind: 'oil', opens: ['saudi'] }, { kind: 'hack', opens: ['usa'] }],
   };
+  const NAME = { italy: 'Italy', spain: 'Spain', france: 'France', germany: 'Germany', usa: 'USA', russia: 'Russia', china: 'China', saudi: 'Saudi Arabia', northkorea: 'North Korea' };
+  const NEWS = {
+    migration:    ['MIGRATION CRISIS', 'Boats keep landing in {A}. {A} blames {B}.'],
+    ballot:       ['SNAP ELECTION', '{A} goes to the polls. {B} is watching closely.'],
+    veto:         ['UN VETO', '{A} blocks the Security Council. {B} is furious.'],
+    industry:     ['INDUSTRIAL RIVALRY', '{A} and {B} fight over who builds Europe.'],
+    tariffs:      ['TRADE WAR', '{A} slaps tariffs on {B}. {B} hits back.'],
+    gas:          ['GAS WAR', 'The pipeline between {A} and {B} runs dry. Winter is coming.'],
+    surveillance: ['SPY SCANDAL', '{A} was listening to the phone calls of {B}.'],
+    oil:          ['OIL SHOCK', '{A} and {B} fight over the price of a barrel.'],
+    arms:         ['ARMS DEAL', '{A} and {B} sign a billion-dollar weapons deal. It goes wrong.'],
+    sanctions:    ['SANCTIONS', '{A} and {B} freeze each other\'s money.'],
+    summit:       ['SUMMIT', '{A} and {B} meet for a photo. The handshake goes wrong.'],
+    alliance:     ['BROKEN ALLIANCE', '{A} and {B} were friends. Not anymore.'],
+    roulette:     ['ROULETTE', 'The world spins. Nobody chose this war: {A} against {B}.'],
+    debt:         ['DEBT CRISIS', '{A} and {B} argue over who pays the bill.'],
+    car:          ['CAR WAR', 'Cars from {A} flood the roads of {B}.'],
+    expo:         ['EXPO WAR', '{A} and {B} fight to host the World Expo.'],
+    port:         ['PORT DEAL', 'A port changes hands between {A} and {B}. Who controls the sea?'],
+    base:         ['MILITARY BASE', '{B} keeps soldiers in {A}. {A} wants them out.'],
+    raid:         ['EMBASSY RAID', 'Masked men raid an embassy. {A} accuses {B}.'],
+    missile:      ['MISSILE TEST', 'A missile flies over the sea. {A} and {B} are on alert.'],
+    hack:         ['CYBER ATTACK', 'Hackers from {A} break into {B}\'s servers. The lights go out.'],
+  };
+  function headline(c) { const n = NEWS[c.kind] || NEWS.roulette, f = t => t.replace(/\{A\}/g, NAME[c.a]).replace(/\{B\}/g, NAME[c.b]); return [n[0], f(n[1])]; }
+  function wrap(text, x, y, maxW, lh) {
+    const words = text.split(' '); let line = '';
+    words.forEach(w => { const t = line ? line + ' ' + w : w; if (g.measureText(t).width > maxW && line) { g.fillText(line, x, y); y += lh; line = w; } else line = t; });
+    g.fillText(line, x, y);
+  }
   // players own countries: S.world.owner[id] = 0..3 (null = neutral). S.world.conquests[id] = flag flying over it
   const PCOL = ['#ff2bd6', '#3ad8ff', '#ffe040', '#7dff9a'];
   const owner = id => { const o = S.world.owner[id]; return o === undefined ? null : o; };
@@ -477,7 +508,7 @@ function startTarget() {
       else { S.sel = 0; if (owner(COUNTRIES[0]) !== null) move(1); }
     }
     else if (sc === 'pair') go('win'); // no phone: play with the mouse
-    else if (sc === 'win' && S.t > 3) nextDuel();
+    else if (sc === 'win' && S.t > 4) nextDuel();
     else if (sc === 'coins' && S.t > 1.5) duel();
     else if (sc === 'crash' && S.t > 1.5) endTurn();
     else if (sc === 'switch' && S.t > 1.5) duel();
@@ -556,7 +587,7 @@ function startTarget() {
     const sc = S.scene, prog = S.loaded / 10;
     if (sc === 'splash' && ((S.t > 2.2 && prog >= 1) || S.t > 6)) { Modem.play(); go('dial'); }
     else if (sc === 'dial' && ((S.t > 3 && S.dataDone >= 10) || S.t > 7)) { Modem.stop(); Music.start(); go('title'); }
-    const AUTO = { coins: 3.2, crash: 2.8, switch: 3.5, result: 3.5, win: 4.5 };          // nobody has to touch the laptop
+    const AUTO = { coins: 3.2, crash: 2.8, switch: 3.5, result: 3.5, win: 7 };   // the card stays long enough to read it          // nobody has to touch the laptop
     if (AUTO[S.scene] && S.t > AUTO[S.scene]) press();
     if (S.scene === 'draft' && Cam.found) {                                         // choose by pointing the phone
       const list = COUNTRIES.filter(id => owner(id) === null); if (list.length) S.sel = COUNTRIES.indexOf(list[Math.min(list.length - 1, Math.floor(Cam.x * list.length))]);
@@ -865,6 +896,11 @@ function startTarget() {
         let open = c.open; if (c.rule === 'roulette' || kind === 'roulette') { if (t < 2.2) open = [COUNTRIES[Math.floor(S.t * 12) % 9]]; }
         if (t < 1) card(kind, c.from, 120, 50, 80, 112, Math.cos((1 - t) * Math.PI), false, [c.b]);
         else { card(kind, c.from, 120, 50 + Math.round(Math.sin(t * 6) * 2), 80, 112, undefined, false, kind === 'roulette' && t < 2.2 ? open : [c.b]);
+          if (t > 1.2) {   // the news strip: why these two fight
+            const [title, line] = headline(c), k = Math.min(1, (t - 1.2) * 3);
+            g.fillStyle = 'rgba(10,20,60,.9)'; g.fillRect(10, 168, 300 * k, 54); g.fillStyle = '#d32626'; g.fillRect(10, 168, 300 * k, 13);
+            if (k >= 1) { g.textAlign = 'left'; g.fillStyle = '#fff'; g.font = 'bold 9px monospace'; g.fillText(title, 15, 178); g.fillStyle = '#ffe680'; g.font = '8px monospace'; wrap(line, 15, 192, 290, 10); }
+          }
           if (t > 1.6) { flag(g, flagOf(c.a), 62, 92, 42, 28); badge(owner(c.a), 83, 132); flag(g, flagOf(c.b), 216, 92, 42, 28); badge(owner(c.b), 237, 132); } }  // the next duel
       }
       return;
