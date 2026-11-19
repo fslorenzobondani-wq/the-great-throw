@@ -63,7 +63,7 @@ const REACTIONS = {
   china: ['usa', 'northkorea'],    saudi: ['usa', 'france'],        northkorea: ['russia', 'china'],
 };
 
-const CONFIG = { flags: 3, sectors: 3, radius: 84, camMinPixels: 8, flickSpeed: 1.6, growThrow: 1.45, camTolerance: 90 };
+const CONFIG = { duels: 5, flags: 3, sectors: 3, radius: 84, camMinPixels: 8, flickSpeed: 1.6, growThrow: 1.45, camTolerance: 90 };
 // flickSpeed: sideways speed that counts as a throw (screen-widths per second) · growThrow: how much bigger the phone must get in 0.25 s · camTolerance: colour match after calibration
 
 // Each nation's currency. The coin of the day = how much the currency moved against gold since yesterday.
@@ -274,7 +274,7 @@ function startTarget() {
       conn.on('close', () => { S.phone = false; S.conn = null; updateQR(); });
     });
   } catch (e) { console.warn('PeerJS unavailable: single-player mode'); }
-  function sendFlag() { try { if (S.conn && S.phone && S.me) S.conn.send({ type: 'flag', id: S.me }); } catch (e) {} }
+  function sendFlag() { try { if (S.conn && S.phone && S.me) S.conn.send({ type: 'flag', id: S.world.conquests[S.me] || S.me }); } catch (e) {} }
   function makeQR() {
     const b = document.getElementById('qr'), url = location.origin + location.pathname + '?role=phone&flag=' + S.me + '&id=' + code;
     if (b.dataset.url === url || typeof qrcode === 'undefined') return;
@@ -417,40 +417,22 @@ function startTarget() {
     northkorea: [{ kind: 'alliance', opens: ['china', 'russia'] }, { kind: 'missile', opens: ['usa'] }, { kind: 'veto', opens: ['france'] },
                  { kind: 'raid', opens: ['spain'] }, { kind: 'sanctions', opens: ['germany', 'italy'] }, { kind: 'oil', opens: ['saudi'] }],
   };
-  // the twists: can come after any win
-  const TWISTS = [
-    { kind: 'sanctions', rule: 'forced', pick: () => ['russia', 'northkorea'] },
-    { kind: 'ballot', rule: 'election', likes: ['spain'] },
-    { kind: 'summit', rule: 'free' },
-    { kind: 'alliance', rule: 'alliance' },
-    { kind: 'roulette', rule: 'roulette' },
-  ];
-  const ALLIES = [['russia', 'northkorea'], ['russia', 'china'], ['china', 'northkorea'], ['usa', 'saudi'], ['france', 'germany'], ['italy', 'spain'], ['usa', 'germany']];
-  const left = () => COUNTRIES.filter(id => !(S.players || []).includes(id) && !S.world.conquests[id]);
-  function outcome(sc, beaten) {
-    const free = left();
-    if (sc.opens) return sc.opens.filter(id => free.includes(id));
-    if (sc.rule === 'forced') return sc.pick(beaten).filter(id => free.includes(id)).slice(0, 1);
-    if (sc.rule === 'free') return free;
-    if (sc.rule === 'roulette') return free.length ? [free[Math.floor(Math.random() * free.length)]] : [];
-    if (sc.rule === 'election') { const mine = Object.keys(S.world.conquests).filter(id => id !== beaten && id !== S.me); return mine.length ? [mine[Math.floor(Math.random() * mine.length)]] : []; }
-    if (sc.rule === 'alliance') { const pairs = ALLIES.filter(([a, b]) => free.includes(a) && free.includes(b)); return pairs.length ? pairs[Math.floor(Math.random() * pairs.length)] : []; }
-    return [];
+  // players own countries: S.world.owner[id] = 0..3 (null = neutral). S.world.conquests[id] = flag flying over it
+  const PCOL = ['#ff2bd6', '#3ad8ff', '#ffe040', '#7dff9a'];
+  const owner = id => { const o = S.world.owner[id]; return o === undefined ? null : o; };
+  const enemies = (a, b) => owner(a) !== owner(b) && (owner(a) !== null || owner(b) !== null);
+  const flagOf = id => S.world.conquests[id] || id;
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  // after a duel: a real story of the winning country points at its next rival; no story left → roulette
+  function scenarioAfter(winner) {
+    const stories = winner ? (STORIES[winner] || []).map(sc => ({ sc, o: sc.opens.filter(id => id !== winner && enemies(winner, id)) })).filter(x => x.o.length) : [];
+    if (winner && owner(winner) !== null && stories.length) { const { sc, o } = pick(stories); return { kind: sc.kind, from: winner, a: winner, b: pick(o), open: o }; }
+    const pairs = []; COUNTRIES.forEach(a => COUNTRIES.forEach(b => { if (a < b && enemies(a, b)) pairs.push(owner(a) === null ? [b, a] : [a, b]); }));
+    const pvp = pairs.filter(([a, b]) => owner(b) !== null);   // the roulette prefers player against player
+    const [a, b] = pick(pvp.length ? pvp : pairs); return { kind: 'roulette', from: a, a, b, open: [b] };
   }
-  function scenarioAfter(beaten) {
-    const stories = (STORIES[beaten] || []).map(sc => ({ sc, o: outcome(sc, beaten) })).filter(x => x.o.length);
-    const twists = TWISTS.flatMap(sc => (sc.likes && sc.likes.includes(beaten) ? [sc, sc, sc] : [sc])).map(sc => ({ sc, o: outcome(sc, beaten) })).filter(x => x.o.length);
-    const pool = stories.length && Math.random() < .75 ? stories : twists.length ? twists : stories;
-    if (!pool.length) return { kind: 'summit', rule: 'free', open: left() };
-    const { sc, o } = pool[Math.floor(Math.random() * pool.length)];
-    return { kind: sc.kind, rule: sc.rule || (o.length === 1 ? 'forced' : 'choice'), open: o };
-  }
-  // apply the card to the world
-  function applyScenario(c) {
-    S.world.open = c.open; S.world.alliance = null;
-    if (c.rule === 'election') delete S.world.conquests[c.open[0]];          // the country you held votes you out: win it back
-    if (c.rule === 'alliance') { S.world.alliance = c.open.slice(); S.world.open = [c.open[0]]; } // beat one, the ally falls too
-  }
+  function players() { return [...Array(S.n).keys()]; }
+  function countOf(p) { return COUNTRIES.filter(id => owner(id) === p).length; }
 
   // --- laptop input
   const pos = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
@@ -459,10 +441,11 @@ function startTarget() {
     if (p.y > 226 && p.x > 252 && p.x < 280) return Music.toggleMute();
     if (S.scene === 'pair' && p.x >= 170 && p.x <= 258 && p.y >= 72 && p.y <= 138) return Cam.calibrate((p.x - 170) / 88, (p.y - 72) / 66);
     if (S.scene === 'duel') return throwFlag(p.x, p.y);
-    if (S.scene === 'pickMe' || S.scene === 'pickMe2' || S.scene === 'pickRival') {
+    if (S.scene === 'draft') {
       const i = Math.floor((p.x - 8) / 34);
-      if (i >= 0 && i < 9 && p.y > 60 && p.y < 200) { if (S.scene === 'pickRival' && !allowed(COUNTRIES[i])) return; if (i === S.sel) press(); else S.sel = i; return; }
+      if (i >= 0 && i < 9 && p.y > 60 && p.y < 200) { if (owner(COUNTRIES[i]) !== null) return; if (i === S.sel) press(); else S.sel = i; return; }
     }
+    if (S.scene === 'players' && p.y > 60 && p.y < 190) { const i = Math.max(0, Math.min(2, Math.floor((p.x - 40) / 80))); if (i === S.sel) press(); else S.sel = i; return; }
     press();
   });
   addEventListener('keydown', e => {
@@ -472,58 +455,70 @@ function startTarget() {
     if (e.key === '[' || e.key === ']') { const k = e.key === ']' ? .8 : 1.25; CONFIG.flickSpeed *= k; CONFIG.growThrow = 1 + (CONFIG.growThrow - 1) * k; S.sensShow = 2; } // ] = more sensitive
     if (e.key === 'Enter' || e.key === ' ') press();
   });
-  function allowed(id) {
-    if ((S.players || []).includes(id)) return false;
-    const open = (S.world.open || []).filter(r => !S.world.conquests[r] && !(S.players || []).includes(r));
-    return open.length ? open.includes(id) : !S.world.conquests[id];
+  function move(d) {
+    if (S.scene === 'players') S.sel = (S.sel + d + 3) % 3;
+    if (S.scene === 'draft') for (let i = 0; i < 9; i++) { S.sel = (S.sel + d + 9) % 9; if (owner(COUNTRIES[S.sel]) === null) break; }
   }
-  function move(d) { if (S.scene === 'pickMe' || S.scene === 'pickMe2') S.sel = (S.sel + d + 9) % 9; if (S.scene === 'pickRival') { for (let i = 0; i < 9; i++) { S.sel = (S.sel + d + 9) % 9; if (allowed(COUNTRIES[S.sel])) break; } } }
 
   function go(sc) { S.scene = sc; S.t = 0; if (sc === 'pair') Cam.start(); updateQR(); if (sc === 'crash') Music.crash(); }
   function press() {
     const sc = S.scene;
     if (sc === 'off') { Modem.unlock(); go('splash'); }
     else if (sc === 'splash' || sc === 'dial') { Modem.stop(); Music.start(); go('title'); } // skip the intro
-    else if (sc === 'title') { Music.start(); S.sel = 0; go('pickMe'); }
-    else if (sc === 'pickMe') { S.players = [COUNTRIES[S.sel], null]; S.me = S.players[0]; S.sel = (S.sel + 1) % 9; go('pickMe2'); }
-    else if (sc === 'pickMe2') { const id = COUNTRIES[S.sel]; S.players[1] = id === S.players[0] ? null : id; S.me = S.players[0]; S.sel = 0; go('pickRival'); if (!allowed(COUNTRIES[S.sel])) move(1); } // picking yourself again = play alone
-    else if (sc === 'pickRival') { if (!allowed(COUNTRIES[S.sel])) return; S.rival = COUNTRIES[S.sel]; S.turn = 0; S.scores = [0, 0]; S.closed = [false, false]; S.me = S.players[0]; Cam.on === true ? coins() : go('pair'); sendFlag(); }
-    else if (sc === 'pair') coins(); // no phone: play solo with the mouse
+    else if (sc === 'title') { Music.start(); S.sel = 0; go('players'); }
+    else if (sc === 'players') {                       // how many players: 2, 3 or 4
+      S.n = S.sel + 2; S.world = { conquests: {}, owner: {}, cards: [] }; S.picker = 0; S.duels = 0; S.sel = 0; S.me = null; go('draft');
+    }
+    else if (sc === 'draft') {                         // everybody takes a country in turn until they run out; leftovers stay neutral
+      const id = COUNTRIES[S.sel]; if (owner(id) !== null) return;
+      S.world.owner[id] = S.picker; S.picker = (S.picker + 1) % S.n;
+      const taken = Object.keys(S.world.owner).length;
+      if (taken >= Math.floor(9 / S.n) * S.n) { S.scenario = scenarioAfter(null); S.last = null; Cam.on === true ? go('win') : go('pair'); }
+      else { S.sel = 0; if (owner(COUNTRIES[0]) !== null) move(1); }
+    }
+    else if (sc === 'pair') go('win'); // no phone: play with the mouse
+    else if (sc === 'win' && S.t > 3) nextDuel();
     else if (sc === 'coins' && S.t > 1.5) duel();
     else if (sc === 'crash' && S.t > 1.5) endTurn();
     else if (sc === 'switch' && S.t > 1.5) duel();
     else if (sc === 'result' && S.t > 1.5) afterResult();
-    else if (sc === 'win' && S.t > 3) { S.me = S.players[0]; go(Object.keys(S.world.conquests).length >= 9 - S.players.filter(Boolean).length ? 'ending' : 'pickRival'); if (S.scene === 'pickRival' && !allowed(COUNTRIES[S.sel])) move(1); }
-    else if (sc === 'ending' && S.t > 2) { S.world = { conquests: {}, open: [], cards: [] }; save(); go('title'); }
+    else if (sc === 'ending' && S.t > 2) { S.me = null; go('title'); }
   }
 
-  // turns: each player throws 3 flags at the same leader; touching the leader ends your turn with 0
+  // a duel: the two countries the card picked. Each one throws 3 flags at the other's leader;
+  // touching the leader ends your turn with 0. A neutral country does not throw: close the triangle to take it.
+  function nextDuel() {
+    const c = S.scenario; S.duelists = [c.a, c.b]; S.turn = 0; S.scores = [0, 0]; S.closed = [false, false];
+    S.me = c.a; S.rival = c.b; S.world.cards = (S.world.cards || []).concat({ kind: c.kind, from: c.from, open: c.open }); sendFlag(); coins();
+  }
   function endTurn() {
-    if (S.players[1] && S.turn === 0) { S.turn = 1; S.me = S.players[1]; sendFlag(); go('switch'); }
+    if (S.turn === 0 && owner(S.duelists[1]) !== null) { S.turn = 1; S.me = S.duelists[1]; S.rival = S.duelists[0]; sendFlag(); go('switch'); }
     else go('result');
   }
   function afterResult() {
-    const [a, b] = S.scores;
-    if (!S.players[1]) { if (S.closed[0]) conquer(S.players[0]); else { S.turn = 0; duel(); } return; }   // alone: close the triangle to win
-    if (a === b) { S.turn = 0; S.me = S.players[0]; sendFlag(); duel(); return; }                     // tie: play again
-    conquer(S.players[a > b ? 0 : 1]);
+    const [a, b] = S.duelists, two = owner(b) !== null;
+    if (two && S.scores[0] === S.scores[1]) { S.turn = 0; S.me = a; S.rival = b; sendFlag(); duel(); return; }   // tie: play again
+    const win = two ? (S.scores[0] > S.scores[1] ? a : b) : (S.closed[0] ? a : null), lose = win === a ? b : a;
+    S.duels++;
+    if (win) { S.world.owner[lose] = owner(win); S.world.conquests[lose] = flagOf(win); }   // the beaten country flies the winner's flag
+    S.last = win;
+    const alive = players().filter(p => countOf(p) > 0);
+    if (alive.length === 1 && COUNTRIES.every(id => owner(id) === alive[0]) || S.duels >= CONFIG.duels) return finish();
+    S.scenario = scenarioAfter(win || b); go('win');
   }
-  function conquer(winner) {
-    S.me = winner;
-    S.world.conquests[S.rival] = winner;
-    const al = S.world.alliance; if (al && al.includes(S.rival)) al.forEach(id => S.world.conquests[id] = winner); // the alliance falls together
-    S.scenario = scenarioAfter(S.rival); applyScenario(S.scenario);
-    S.world.cards = (S.world.cards || []).concat({ kind: S.scenario.kind, from: S.rival, open: S.scenario.open });
-    save(); go('win');
+  function finish() {   // most countries wins; the winner's home flag covers the screen
+    const best = Math.max(...players().map(countOf)), top = players().filter(p => countOf(p) === best);
+    if (top.length > 1 && S.duels < CONFIG.duels + 3) { S.scenario = scenarioAfter(S.last || S.duelists[1]); go('win'); return; }   // draw: one more duel
+    S.champ = top[0]; S.me = COUNTRIES.find(id => owner(id) === S.champ && !S.world.conquests[id]) || COUNTRIES.find(id => owner(id) === S.champ); go('ending');
   }
 
-  function coins() { decide(); go('coins'); }
+  function coins() { decide(); S.adv = S.meFirst ? S.duelists[0] : S.duelists[1]; go('coins'); }
 
   function duel() {
-    go('duel'); Music.start(); S.me = S.players[S.turn]; sendFlag();
+    go('duel'); Music.start();
     S.flights = []; S.planted = []; S.left = CONFIG.flags; S.influence = 0; S.wheel = 0;
     // the weaker coin gets the advantage: the wheel starts still
-    S.hold = S.meFirst ? 1.5 : 0;
+    S.hold = S.adv === S.me ? 1.5 : 0;
     S.falling = [];
   }
 
@@ -557,15 +552,16 @@ function startTarget() {
   function update(dt) {
     S.t += dt; S.clock = (S.clock || 0) + dt;
     Cam.tick(dt, S.clock);
-    if (S.scene === 'pair' && Cam.seen > 1) coins();
+    if (S.scene === 'pair' && Cam.seen > 1) go('win');
     const sc = S.scene, prog = S.loaded / 10;
     if (sc === 'splash' && ((S.t > 2.2 && prog >= 1) || S.t > 6)) { Modem.play(); go('dial'); }
     else if (sc === 'dial' && ((S.t > 3 && S.dataDone >= 10) || S.t > 7)) { Modem.stop(); Music.start(); go('title'); }
-    const AUTO = { coins: 3.2, crash: 2.8, switch: 3.5, result: 3.5, win: 5 };          // nobody has to touch the laptop
+    const AUTO = { coins: 3.2, crash: 2.8, switch: 3.5, result: 3.5, win: 4.5 };          // nobody has to touch the laptop
     if (AUTO[S.scene] && S.t > AUTO[S.scene]) press();
-    if (S.scene === 'pickRival' && Cam.found) {                                     // choose the next rival by pointing the phone
-      const list = COUNTRIES.filter(allowed); if (list.length) S.sel = COUNTRIES.indexOf(list[Math.min(list.length - 1, Math.floor(Cam.x * list.length))]);
+    if (S.scene === 'draft' && Cam.found) {                                         // choose by pointing the phone
+      const list = COUNTRIES.filter(id => owner(id) === null); if (list.length) S.sel = COUNTRIES.indexOf(list[Math.min(list.length - 1, Math.floor(Cam.x * list.length))]);
     }
+    if (S.scene === 'players' && Cam.found) S.sel = Math.min(2, Math.floor(Cam.x * 3));
     if (S.scene !== 'duel') return;
     if (S.hold > 0) S.hold -= dt;
     else {
@@ -699,7 +695,8 @@ function startTarget() {
     g.restore();
   }
 
-  function groupShot(rivalPick) {
+  function badge(p, x, y) { if (p === null || p === undefined) { g.fillStyle = '#888'; g.fillRect(x - 3, y - 3, 6, 6); return; } g.fillStyle = PCOL[p]; g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.fill(); number(p + 1, x, y + 3, '#0a246a'); }
+  function groupShot(rivalPick, empty) {
     // PS1-cover group photo: cyan-to-violet gradient, low-poly sofa
     live(null);
     for (let y = 0; y < 226; y += 2) { const k = y / 226; g.fillStyle = `rgb(${Math.round(90 + 90 * k)},${Math.round(200 - 120 * k)},${Math.round(230 - 30 * k)})`; g.fillRect(0, y, W, 2); }
@@ -708,12 +705,12 @@ function startTarget() {
     COUNTRIES.forEach((id, i) => {
       const sp = SPR[id], x = 8 + i * 34 + 17, sel = i === S.sel, cq = S.world.conquests[id];
       const h = sel ? 84 : 70, y = 170 - h + (sel ? Math.round(Math.sin(S.t * 8) * 2) : 0);
-      const dim = rivalPick && !allowed(id);
+      const dim = S.scene === 'draft' && owner(id) !== null; if (empty) return;
       if (sel) { g.fillStyle = 'rgba(255,240,140,.5)'; g.fillRect(x - 17, y - 4, 34, h + 8); }
-      if (rivalPick && allowed(id) && Math.floor(S.t * 3) % 2) { g.strokeStyle = '#3a7bf0'; g.lineWidth = 2; g.strokeRect(x - 16, y - 3, 32, h + 6); }
       if (sp.ok) { const k = h / sp.im.height; g.globalAlpha = dim ? .3 : 1; g.drawImage(sp.im, x - sp.im.width * k / 2, y, sp.im.width * k, h); g.globalAlpha = 1; }
       flag(g, id, x - 7, 192, 14, 9);
       if (cq) flag(g, cq, x - 6, y - 12, 12, 8);
+      if (S.scene === 'draft' && owner(id) !== null) badge(owner(id), x, 210);
     });
     taskbar();
   }
@@ -771,7 +768,7 @@ function startTarget() {
       return;
     }
     if (sc === 'pair') {
-      desktop(null); windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, S.me);
+      desktop(null); windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, COUNTRIES.find(id => owner(id) === 0));
       g.fillStyle = 'rgba(10,20,60,.85)'; g.fillRect(WIN.x + 2, WIN.y + 12, WIN.w - 4, WIN.h - 14);
       // 1. scan the QR (DOM, left)   2. show the pink phone to the webcam (right)
       g.fillStyle = '#ffe680'; g.font = '900 12px "Arial Black", sans-serif'; g.textAlign = 'center';
@@ -781,45 +778,46 @@ function startTarget() {
       // phone icon held up towards the camera
       const px = 199, py = 146 + Math.round(Math.sin(S.t * 3) * 2);
       g.fillStyle = '#222'; g.fillRect(px, py, 30, 52); g.fillStyle = '#ff2bd6'; g.fillRect(px + 2, py + 3, 26, 46);
-      flag(g, S.me, px + 4, py + 18, 22, 15);
+      flag(g, COUNTRIES.find(id => owner(id) === 0) || 'italy', px + 4, py + 18, 22, 15);
       // progress: the phone is being seen
       for (let i = 0; i < 8; i++) { g.fillStyle = i < Cam.seen * 8 ? '#7dff9a' : 'rgba(255,255,255,.2)'; g.fillRect(170 + i * 11, 142, 9, 3); }
       // solo option: blinking mouse icon (click to play without a phone)
       if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#fff'; g.fillRect(WIN.x + 10, 196, 10, 14); g.fillStyle = '#1f4fb8'; g.fillRect(WIN.x + 14, 196, 2, 5); }
       return;
     }
-    if (sc === 'pickMe2') {
-      groupShot(false);
-      // player 1 already chosen; pick player 2 (picking player 1 again = play alone)
-      const p1 = S.players[0], i1 = COUNTRIES.indexOf(p1); g.strokeStyle = '#ff2bd6'; g.lineWidth = 2; g.strokeRect(8 + i1 * 34 + 1, 82, 32, 102);
-      flag(g, p1, 100, 22, 34, 23); number(1, 117, 56, '#fff');
-      if (COUNTRIES[S.sel] === p1) { g.fillStyle = '#fff'; g.beginPath(); g.arc(197, 28, 5, 0, Math.PI * 2); g.fill(); g.fillRect(190, 35, 14, 10); }   // one player
-      else { flag(g, COUNTRIES[S.sel], 180, 22, 34, 23); number(2, 197, 56, '#fff'); }
-      g.fillStyle = '#fff'; g.fillRect(152, 32, 12, 3); g.fillRect(156, 28, 3, 11);
-      return;
-    }
     if (sc === 'switch' || sc === 'result') {
       desktop(S.rival); windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, S.rival);
       g.fillStyle = 'rgba(10,20,60,.82)'; g.fillRect(WIN.x + 2, WIN.y + 12, WIN.w - 4, WIN.h - 14);
-      const two = !!S.players[1];
+      const D = S.duelists, two = owner(D[1]) !== null;
       [0, 1].forEach(i => {
-        if (!two && i === 1) return;
-        const x = two ? (i ? 205 : 115) : 160, win = sc === 'result' && (two ? S.scores[i] > S.scores[1 - i] : S.closed[0]);
+        const x = i ? 205 : 115, win = sc === 'result' && (two ? S.scores[i] > S.scores[1 - i] : (i === 0) === S.closed[0]);
         const s = win ? 1 + Math.sin(S.t * 6) * .08 + .2 : 1, w = 48 * s, h = 32 * s;
-        flag(g, S.players[i], x - w / 2, 70 - h / 2, w, h);
+        flag(g, flagOf(D[i]), x - w / 2, 70 - h / 2, w, h); badge(owner(D[i]), x, 40);
+        if (!two && i === 1) return;
         number(sc === 'switch' && i === 1 ? '?' : S.scores[i], x, 112, win ? '#ffe680' : '#fff');
         if (S.closed[i]) { g.strokeStyle = '#7dff9a'; g.lineWidth = 2; g.beginPath(); g.moveTo(x - 8, 130); g.lineTo(x, 122); g.lineTo(x + 8, 130); g.closePath(); g.stroke(); } // triangle closed
       });
       if (sc === 'switch') {   // the phone passes from player 1 to player 2
         const k = Math.min(1, S.t / 1.5), px = 115 + 90 * (1 - Math.cos(k * Math.PI)) / 2, py = 160 - Math.sin(k * Math.PI) * 18;
-        g.fillStyle = '#222'; g.fillRect(px - 9, py - 15, 18, 30); g.fillStyle = '#ff2bd6'; g.fillRect(px - 7, py - 13, 14, 26); flag(g, S.players[1], px - 5, py - 4, 10, 7);
+        g.fillStyle = '#222'; g.fillRect(px - 9, py - 15, 18, 30); g.fillStyle = '#ff2bd6'; g.fillRect(px - 7, py - 13, 14, 26); flag(g, flagOf(D[1]), px - 5, py - 4, 10, 7);
       }
       return;
     }
-    if (sc === 'pickMe' || sc === 'pickRival') {
-      groupShot(sc === 'pickRival');
-      if (sc === 'pickMe') { flag(g, COUNTRIES[S.sel], 140, 18, 40, 27); number(1, 160, 56, '#fff'); }
-      else if (S.players) { const ps = S.players.filter(Boolean); ps.forEach((p, i) => flag(g, p, 112 - i * 22 + (ps.length === 1 ? 8 : 0), 22, 18, 12)); g.fillStyle = '#fff'; g.fillRect(150, 30, 10, 3); flag(g, COUNTRIES[S.sel], 168, 18, 36, 24); }
+    if (sc === 'players') {   // pixel people: 2, 3 or 4 players
+      groupShot(false, true);
+      g.fillStyle = 'rgba(10,20,60,.8)'; g.fillRect(30, 50, 260, 150);
+      [2, 3, 4].forEach((n, i) => {
+        const cx = 80 + i * 80, sel = i === S.sel, b = sel ? Math.round(Math.sin(S.t * 8) * 2) : 0;
+        if (sel) { g.fillStyle = 'rgba(255,240,140,.35)'; g.fillRect(cx - 38, 60, 76, 130); }
+        for (let k = 0; k < n; k++) { const x = cx - (n - 1) * 8 + k * 16; g.fillStyle = PCOL[k]; g.fillRect(x - 4, 100 + b, 8, 8); g.fillRect(x - 6, 110 + b, 12, 18); g.fillRect(x - 5, 128 + b, 4, 12); g.fillRect(x + 1, 128 + b, 4, 12); }
+        number(n, cx, 172, sel ? '#ffe680' : '#fff');
+      });
+      return;
+    }
+    if (sc === 'draft') {     // everybody takes countries in turn
+      groupShot(false);
+      g.fillStyle = PCOL[S.picker]; g.fillRect(118, 14, 84, 40); g.fillStyle = '#0a246a'; g.fillRect(120, 16, 80, 36);
+      flag(g, COUNTRIES[S.sel], 146, 22, 36, 24); badge(S.picker, 132, 34);
       return;
     }
     if (sc === 'coins') {
@@ -845,9 +843,9 @@ function startTarget() {
       desktop(S.rival);
       windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, S.rival);
       wheel();
-      S.planted.forEach(p => { const s = toScreen(p.l); pole(s.x, s.y, S.me, 1, p.t); });
-      S.flights.forEach(f => { const t = Math.min(1, f.t), x = CX + (f.tx - CX) * t, y = 250 + (f.ty - 250) * t - Math.sin(t * Math.PI) * 40; pole(x, y, S.me, 2.2 - t * 1.2, S.t); });
-      (S.falling || []).forEach(p => { p.v += .25; p.y += p.v; pole(p.x, p.y, S.me, 1, S.t); });
+      S.planted.forEach(p => { const s = toScreen(p.l); pole(s.x, s.y, flagOf(S.me), 1, p.t); });
+      S.flights.forEach(f => { const t = Math.min(1, f.t), x = CX + (f.tx - CX) * t, y = 250 + (f.ty - 250) * t - Math.sin(t * Math.PI) * 40; pole(x, y, flagOf(S.me), 2.2 - t * 1.2, S.t); });
+      (S.falling || []).forEach(p => { p.v += .25; p.y += p.v; pole(p.x, p.y, flagOf(S.me), 1, S.t); });
       S.falling = (S.falling || []).filter(p => p.y < 240);
       if (sc === 'duel' && Cam.found) S.aim = camAim(Cam.x, Cam.y);
       if (sc === 'duel') camPreview(WIN.x + 6, WIN.y + 16, 48, 36);
@@ -857,19 +855,21 @@ function startTarget() {
     }
     if (sc === 'crash') { crash(); return; }
     if (sc === 'win') {
-      desktop(S.rival);
-      const s = Math.min(1, S.t * 1.5), fade = Math.max(0, 1 - Math.max(0, S.t - 1) * 2);
-      g.globalAlpha = fade; flag(g, S.me, 160 - 60 * s, 118 - 40 * s, 120 * s, 80 * s); g.globalAlpha = 1;
-      if (S.t > .9) {
-        const c = S.scenario, kind = c.kind, t = S.t - .9;
-        let open = c.open; if (c.rule === 'roulette' && t < 2.2) open = [left()[Math.floor(S.t * 12) % Math.max(1, left().length)] || c.open[0]]; // roulette spinning
-        if (t < 1) card(kind, S.rival, 120, 50, 80, 112, Math.cos((1 - t) * Math.PI), false, open);     // appears and flips over
-        else if (t < 2.6) card(kind, S.rival, 120, 50 + Math.round(Math.sin(t * 6) * 2), 80, 112, undefined, c.rule !== 'roulette' || t > 2.2, open); // the story: who comes next
-        else { const k = Math.min(1, (t - 2.6) / .5), n = Math.min(8, S.world.cards.length - 1); card(kind, S.rival, 120 + (46 + n * 12 - 120) * k, 50 + (227 - 50) * k, 80 - 70 * k, 112 - 100 * k, undefined, false, open); } // filed in the taskbar
+      desktop(S.scenario.a);
+      const s = Math.min(1, S.t * 1.5), fade = S.last ? Math.max(0, 1 - Math.max(0, S.t - 1) * 2) : 0;
+      g.globalAlpha = fade; if (S.last) flag(g, flagOf(S.last), 160 - 60 * s, 118 - 40 * s, 120 * s, 80 * s); g.globalAlpha = 1;
+      for (let i = 0; i < CONFIG.duels; i++) { g.fillStyle = i < S.duels ? '#ffe680' : 'rgba(255,255,255,.3)'; g.beginPath(); g.arc(160 - (CONFIG.duels - 1) * 6 + i * 12, 14, 3, 0, Math.PI * 2); g.fill(); }
+      const st = S.last ? .9 : 0;
+      if (S.t > st) {
+        const c = S.scenario, kind = c.kind, t = S.t - st;
+        let open = c.open; if (c.rule === 'roulette' || kind === 'roulette') { if (t < 2.2) open = [COUNTRIES[Math.floor(S.t * 12) % 9]]; }
+        if (t < 1) card(kind, c.from, 120, 50, 80, 112, Math.cos((1 - t) * Math.PI), false, [c.b]);
+        else { card(kind, c.from, 120, 50 + Math.round(Math.sin(t * 6) * 2), 80, 112, undefined, false, kind === 'roulette' && t < 2.2 ? open : [c.b]);
+          if (t > 1.6) { flag(g, flagOf(c.a), 62, 92, 42, 28); badge(owner(c.a), 83, 132); flag(g, flagOf(c.b), 216, 92, 42, 28); badge(owner(c.b), 237, 132); } }  // the next duel
       }
       return;
     }
-    if (sc === 'ending') { live(null); for (let y = 0; y < 226; y += 20) for (let x = 0; x < W; x += 30) flag(g, S.me, x + ((y / 20) % 2) * 15 - 15, y, 28, 18); taskbar(); }
+    if (sc === 'ending') { live(null); for (let y = 0; y < 226; y += 20) for (let x = 0; x < W; x += 30) flag(g, S.me, x + ((y / 20) % 2) * 15 - 15, y, 28, 18); g.save(); g.translate(160, 110); g.scale(3, 3); badge(S.champ, 0, 0); g.restore(); taskbar(); }
   }
 
   // wireframe globe, rotating, with a flag on each capital (real latitude and longitude)
@@ -907,7 +907,7 @@ function startTarget() {
   }
 
   function hud() {
-    if (S.players && S.players[1]) { flag(g, S.me, WIN.x + 6, WIN.y + 56, 20, 13); number(S.turn + 1, WIN.x + 16, WIN.y + 80, '#fff'); }
+    if (S.me) { flag(g, flagOf(S.me), WIN.x + 6, WIN.y + 56, 20, 13); badge(owner(S.me), WIN.x + 16, WIN.y + 80); }
     if (Cam.on === true) {   // throw power: fill it to the top and the flag goes
       const px = WIN.x + WIN.w - 12, py = WIN.y + 60, ph = 90, f = Math.min(1, Cam.power);
       g.fillStyle = 'rgba(0,0,0,.5)'; g.fillRect(px - 4, py, 8, ph);
@@ -916,7 +916,7 @@ function startTarget() {
     }
     if (S.sensShow > 0) { S.sensShow -= .02; number(CONFIG.flickSpeed.toFixed(2), WIN.x + WIN.w - 20, WIN.y + 24, '#fff'); }
     // flags left (bottom of the window)
-    for (let i = 0; i < CONFIG.flags; i++) { if (i < S.left) flag(g, S.me, WIN.x + 6 + i * 15, WIN.y + WIN.h - 14, 12, 8); else { g.fillStyle = 'rgba(0,0,0,.4)'; g.fillRect(WIN.x + 6 + i * 15, WIN.y + WIN.h - 14, 12, 8); } }
+    for (let i = 0; i < CONFIG.flags; i++) { if (i < S.left) flag(g, flagOf(S.me), WIN.x + 6 + i * 15, WIN.y + WIN.h - 14, 12, 8); else { g.fillStyle = 'rgba(0,0,0,.4)'; g.fillRect(WIN.x + 6 + i * 15, WIN.y + WIN.h - 14, 12, 8); } }
     // ring sectors
     sectors().forEach((ok, i) => {
       const a0 = i / CONFIG.sectors * Math.PI * 2 + S.wheel, a1 = (i + 1) / CONFIG.sectors * Math.PI * 2 + S.wheel;
