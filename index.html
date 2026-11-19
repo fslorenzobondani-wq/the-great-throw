@@ -885,15 +885,14 @@ function startTarget() {
       return;
     }
     if (sc === 'duel' || (sc === 'crash' && S.crash && S.t < .7)) {
-      desktop(S.rival);
-      windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, S.rival);
+      background(S.rival);   // duel: the city video full screen, only the target on top
       wheel();
       S.planted.forEach(p => { const s = toScreen(p.l); pole(s.x, s.y, flagOf(S.me), 1, p.t); });
       S.flights.forEach(f => { const t = Math.min(1, f.t), x = CX + (f.tx - CX) * t, y = 250 + (f.ty - 250) * t - Math.sin(t * Math.PI) * 40; pole(x, y, flagOf(S.me), 2.2 - t * 1.2, S.t); });
       (S.falling || []).forEach(p => { p.v += .25; p.y += p.v; pole(p.x, p.y, flagOf(S.me), 1, S.t); });
       S.falling = (S.falling || []).filter(p => p.y < 240);
       if (sc === 'duel' && Cam.found) S.aim = camAim(Cam.x, Cam.y);
-      if (sc === 'duel') camPreview(WIN.x + 6, WIN.y + 16, 48, 36);
+      if (sc === 'duel') camPreview(W - 54, 6, 48, 36);
       if (sc === 'duel' && S.aim) { const a = S.aim, r = 7 + Math.sin(S.t * 10); g.strokeStyle = '#ff2bd6'; g.lineWidth = 2; g.beginPath(); g.arc(a.x, a.y, r, 0, Math.PI * 2); g.stroke(); g.fillStyle = '#ff2bd6'; g.fillRect(a.x - 1, a.y - r - 4, 2, 4); g.fillRect(a.x - 1, a.y + r, 2, 4); g.fillRect(a.x - r - 4, a.y - 1, 4, 2); g.fillRect(a.x + r, a.y - 1, 4, 2); }
       if (sc === 'duel') hud(); else crash();
       return;
@@ -957,23 +956,25 @@ function startTarget() {
   }
 
   function hud() {
-    if (S.me) { flag(g, flagOf(S.me), WIN.x + 6, WIN.y + 56, 20, 13); badge(owner(S.me), WIN.x + 16, WIN.y + 80); }
+    const pill = (x, y, w, h) => { g.fillStyle = 'rgba(0,0,0,.45)'; g.fillRect(x, y, w, h); };
+    if (S.me) { pill(6, 6, 46, 20); flag(g, flagOf(S.me), 10, 9, 21, 14); badge(owner(S.me), 42, 16); }      // who is throwing
     if (Cam.on === true) {   // throw power: fill it to the top and the flag goes
-      const px = WIN.x + WIN.w - 12, py = WIN.y + 60, ph = 90, f = Math.min(1, Cam.power);
+      const px = W - 12, py = 60, ph = 90, f = Math.min(1, Cam.power);
       g.fillStyle = 'rgba(0,0,0,.5)'; g.fillRect(px - 4, py, 8, ph);
       g.fillStyle = f >= 1 ? '#ffffff' : f > .7 ? '#ffe040' : '#7dff9a'; g.fillRect(px - 3, py + ph - f * ph, 6, f * ph);
       g.fillStyle = '#ff2bd6'; g.fillRect(px - 5, py, 10, 2);
     }
-    if (S.sensShow > 0) { S.sensShow -= .02; number(CONFIG.flickSpeed.toFixed(2), WIN.x + WIN.w - 20, WIN.y + 24, '#fff'); }
-    // flags left (bottom of the window)
-    for (let i = 0; i < CONFIG.flags; i++) { if (i < S.left) flag(g, flagOf(S.me), WIN.x + 6 + i * 15, WIN.y + WIN.h - 14, 12, 8); else { g.fillStyle = 'rgba(0,0,0,.4)'; g.fillRect(WIN.x + 6 + i * 15, WIN.y + WIN.h - 14, 12, 8); } }
+    if (S.sensShow > 0) { S.sensShow -= .02; number(CONFIG.flickSpeed.toFixed(2), W - 30, 52, '#fff'); }
+    // flags left (bottom left) and points (bottom right)
+    pill(6, H - 20, 50, 14);
+    for (let i = 0; i < CONFIG.flags; i++) { if (i < S.left) flag(g, flagOf(S.me), 9 + i * 15, H - 17, 12, 8); else { g.fillStyle = 'rgba(255,255,255,.2)'; g.fillRect(9 + i * 15, H - 17, 12, 8); } }
+    pill(W - 40, H - 20, 34, 14); number(S.influence, W - 23, H - 10);
     // ring sectors
     sectors().forEach((ok, i) => {
       const a0 = i / CONFIG.sectors * Math.PI * 2 + S.wheel, a1 = (i + 1) / CONFIG.sectors * Math.PI * 2 + S.wheel;
       g.strokeStyle = ok ? 'rgba(255,230,90,.95)' : 'rgba(255,255,255,.25)'; g.lineWidth = 3;
       g.beginPath(); g.arc(CX, CY, CONFIG.radius + 14, a0 + .06, a1 - .06); g.stroke();
     });
-    number(S.influence, WIN.x + WIN.w - 20, WIN.y + WIN.h - 7);
   }
 
   let prev = performance.now();
