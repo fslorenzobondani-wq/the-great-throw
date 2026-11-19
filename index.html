@@ -63,7 +63,8 @@ const REACTIONS = {
   china: ['usa', 'northkorea'],    saudi: ['usa', 'france'],        northkorea: ['russia', 'china'],
 };
 
-const CONFIG = { flags: 7, sectors: 6, radius: 84, camMinPixels: 10, flickSpeed: 2.6 }; // flickSpeed: screen-widths per second
+const CONFIG = { flags: 7, sectors: 6, radius: 84, camMinPixels: 8, flickSpeed: 1.6, growThrow: 1.45, camTolerance: 90 };
+// flickSpeed: sideways speed that counts as a throw (screen-widths per second) · growThrow: how much bigger the phone must get in 0.25 s · camTolerance: colour match after calibration
 
 // Each nation's currency. The coin of the day = how much the currency moved against gold since yesterday.
 const CURRENCY = {
@@ -262,7 +263,7 @@ function startTarget() {
       conn.on('open', () => { S.phone = true; updateQR(); sendFlag(); });
       conn.on('data', d => {
         S.signal = 1; // tray phone icon flashes: a message arrived
-        if (d.type === 'tap') press();
+        if (d.type === 'tap') { if (S.scene === 'duel') throwAtAim(); else press(); }
         const r = CONFIG.radius * .95, ax = CX + (d.x - .5) * 2.2 * r, ay = CY + (d.y - .5) * 2.2 * r;
         if (d.type === 'aim') { S.aim = { x: ax, y: ay, t: 1 }; }
         if (d.type === 'throw') {
@@ -281,12 +282,13 @@ function startTarget() {
   }
   function updateQR() { const b = document.getElementById('qr'); if (S.scene === 'pair') makeQR(); const on = S.scene === 'pair' && b.innerHTML; b.style.display = on ? 'block' : 'none'; b.classList.toggle('pair', !!on); }
 
-  // --- WEBCAM TRACKER: finds the pink phone screen, aims with it, throws on a sharp flick
+  // --- WEBCAM TRACKER: finds the pink phone screen, aims with it, throws on a flick
+  // A real throw goes TOWARDS the screen: for the webcam the phone mostly gets BIGGER, so both are measured:
+  // sideways speed + sudden growth. "power" (0..1) is shown in the duel so players see how hard to throw.
   const Cam = (() => {
     const v = document.createElement('video'); v.muted = true; v.playsInline = true;
     const c = document.createElement('canvas'); c.width = 80; c.height = 60; const cg = c.getContext('2d', { willReadFrequently: true });
-    const T = { on: false, found: false, x: .5, y: .5, n: 0, seen: 0, hist: [], lastThrow: 0, speed: 0, wasFast: 0 };
-    T.video = v;
+    const T = { on: false, found: false, x: .5, y: .5, n: 0, seen: 0, hist: [], lastThrow: 0, power: 0, target: null, video: v };
     T.start = () => {
       if (T.on || !navigator.mediaDevices) return;
       T.on = 'asking';
@@ -294,36 +296,49 @@ function startTarget() {
         .then(st => { v.srcObject = st; v.play(); T.on = true; })
         .catch(() => { T.on = false; T.denied = true; });
     };
+    // calibration: learn the exact pink of this phone in this light (click on it in the preview)
+    T.calibrate = (fx, fy) => {
+      if (T.on !== true) return;
+      cg.drawImage(v, 0, 0, 80, 60);
+      const px = Math.round((1 - fx) * 79), py = Math.round(fy * 59), d = cg.getImageData(Math.max(0, px - 1), Math.max(0, py - 1), 3, 3).data;
+      let r = 0, g2 = 0, b = 0; for (let i = 0; i < d.length; i += 4) { r += d[i]; g2 += d[i + 1]; b += d[i + 2]; }
+      T.target = [r / 9, g2 / 9, b / 9]; T.flash = 1;
+    };
+    const isPink = (r, g2, b) => T.target
+      ? Math.abs(r - T.target[0]) + Math.abs(g2 - T.target[1]) + Math.abs(b - T.target[2]) < CONFIG.camTolerance
+      : r > 120 && b > 90 && r - g2 > 55 && b - g2 > 30;
     T.tick = (dt, now) => {
       if (T.on !== true || v.readyState < 2) return;
       cg.drawImage(v, 0, 0, 80, 60);
       const d = cg.getImageData(0, 0, 80, 60).data;
       let sx = 0, sy = 0, n = 0;
-      for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-        const r = d[i], gg = d[i + 1], b = d[i + 2];
-        if (r > 130 && b > 100 && r - gg > 70 && b - gg > 40) { sx += p % 80; sy += (p / 80) | 0; n++; }   // pink
-      }
-      const was = T.found;
-      T.found = n >= CONFIG.camMinPixels; T.n = n;
+      for (let i = 0, p = 0; i < d.length; i += 4, p++) if (isPink(d[i], d[i + 1], d[i + 2])) { sx += p % 80; sy += (p / 80) | 0; n++; }
+      const was = T.found; T.found = n >= CONFIG.camMinPixels;
+      let speed = 0, grow = 0;
       if (T.found) {
-        const nx = 1 - sx / n / 80, ny = sy / n / 60;                                    // mirrored, like a mirror
-        const dx = nx - T.x, dy = ny - T.y; T.speed = Math.hypot(dx, dy) / Math.max(dt, .001);
-        T.x += dx * .5; T.y += dy * .5; T.seen += dt;
-        T.hist.push({ t: now, x: T.x, y: T.y }); while (T.hist.length && now - T.hist[0].t > .6) T.hist.shift();
-        if (T.speed > CONFIG.flickSpeed) T.wasFast = now;
+        const nx = 1 - sx / n / 80, ny = sy / n / 60;                                 // mirrored, like a mirror
+        speed = Math.hypot(nx - T.x, ny - T.y) / Math.max(dt, .001);
+        const old = T.hist.find(h => now - h.t < .25);                                 // size a quarter of a second ago
+        if (old && old.n > 0) grow = n / old.n;
+        T.x += (nx - T.x) * .45; T.y += (ny - T.y) * .45; T.seen += dt; T.n = n;
+        T.hist.push({ t: now, x: T.x, y: T.y, n }); while (T.hist.length && now - T.hist[0].t > .6) T.hist.shift();
       } else T.seen = 0;
-      // a throw = a sharp flick (or the phone vanishing right after a fast move, motion blur)
-      const flick = (T.found && T.speed > CONFIG.flickSpeed) || (was && !T.found && now - T.wasFast < .15);
-      if (flick && now - T.lastThrow > .7 && T.hist.length) {
-        T.lastThrow = now;
-        const aimAt = T.hist.find(h => now - h.t < .35) || T.hist[0];                    // where you were aiming just before the flick
+      // power: the strongest of the two signals, relative to the sensitivity
+      const p = Math.max(speed / CONFIG.flickSpeed, (grow - 1) / (CONFIG.growThrow - 1));
+      T.power = Math.max(p, T.power - dt * 2.5);
+      const vanished = was && !T.found && T.power > .5;                                // motion blur: the phone vanishes mid-throw
+      if ((p >= 1 || vanished) && now - T.lastThrow > .6 && T.hist.length) {
+        T.lastThrow = now; T.power = 1;
+        const aimAt = T.hist.find(h => now - h.t < .35) || T.hist[0];                  // where you aimed just before the throw
         if (T.onThrow) T.onThrow(aimAt.x, aimAt.y);
       }
     };
     return T;
   })();
-  const camAim = (x, y) => { const r = CONFIG.radius * .95, k = v => Math.max(0, Math.min(1, (v - .2) / .6)); return { x: CX + (k(x) - .5) * 2.2 * r, y: CY + (k(y) - .5) * 2.2 * r }; };
+  const camAim = (x, y) => { const r = CONFIG.radius * .95, k = v => Math.max(0, Math.min(1, (v - .2) / .6)), dx = (k(x) - .5) * 2.2 * r, dy = (k(y) - .5) * 2.2 * r, m = Math.min(1, r / Math.max(1e-6, Math.hypot(dx, dy))); return { x: CX + dx * m, y: CY + dy * m }; }; // always on the wheel
   Cam.onThrow = (x, y) => { S.signal = 1; if (S.scene === 'duel') { const a = camAim(x, y); throwFlag(a.x, a.y); } };
+  // backup triggers: a tap on the phone or the space bar throws at the current aim
+  function throwAtAim() { const a = Cam.found ? camAim(Cam.x, Cam.y) : S.aim || { x: CX, y: CY - 70 }; throwFlag(a.x, a.y); Cam.power = 1; }
   function camPreview(x, y, w, h) {
     if (Cam.on !== true) return;
     g.save(); g.translate(x + w, y); g.scale(-1, 1); g.drawImage(Cam.video, 0, 0, w, h); g.restore();   // mirrored
@@ -442,6 +457,7 @@ function startTarget() {
   cv.addEventListener('pointerdown', e => {
     const p = pos(e);
     if (p.y > 226 && p.x > 252 && p.x < 280) return Music.toggleMute();
+    if (S.scene === 'pair' && p.x >= 170 && p.x <= 258 && p.y >= 72 && p.y <= 138) return Cam.calibrate((p.x - 170) / 88, (p.y - 72) / 66);
     if (S.scene === 'duel') return throwFlag(p.x, p.y);
     if (S.scene === 'pickMe' || S.scene === 'pickRival') {
       const i = Math.floor((p.x - 8) / 34);
@@ -452,6 +468,8 @@ function startTarget() {
   addEventListener('keydown', e => {
     if (e.key === 'ArrowRight') move(1);
     if (e.key === 'ArrowLeft') move(-1);
+    if (e.key === ' ' && S.scene === 'duel') { e.preventDefault(); return throwAtAim(); }
+    if (e.key === '[' || e.key === ']') { const k = e.key === ']' ? .8 : 1.25; CONFIG.flickSpeed *= k; CONFIG.growThrow = 1 + (CONFIG.growThrow - 1) * k; S.sensShow = 2; } // ] = more sensitive
     if (e.key === 'Enter' || e.key === ' ') press();
   });
   function allowed(id) {
@@ -735,7 +753,7 @@ function startTarget() {
       // 1. scan the QR (DOM, left)   2. show the pink phone to the webcam (right)
       g.fillStyle = '#ffe680'; g.font = '900 12px "Arial Black", sans-serif'; g.textAlign = 'center';
       number(1, 106, 44, '#ffe680'); number(2, 214, 44, '#ffe680');
-      if (Cam.on === true) camPreview(170, 72, 88, 66);
+      if (Cam.on === true) { camPreview(170, 72, 88, 66); if (Cam.flash > 0) { Cam.flash -= .04; g.fillStyle = `rgba(255,255,255,${Cam.flash})`; g.fillRect(170, 72, 88, 66); } if (!Cam.target && Math.floor(S.t * 2) % 2) { g.fillStyle = '#fff'; g.beginPath(); g.moveTo(250, 128); g.lineTo(250, 138); g.lineTo(253, 135); g.lineTo(256, 139); g.lineTo(257, 138); g.lineTo(254, 134); g.lineTo(258, 134); g.fill(); } }
       else { g.strokeStyle = '#a9c8ff'; g.strokeRect(170.5, 72.5, 88, 66); g.fillStyle = Cam.denied ? '#ff5a4a' : '#a9c8ff'; g.fillRect(204, 98, 20, 14); g.fillRect(224, 101, 6, 8); }
       // phone icon held up towards the camera
       const px = 199, py = 146 + Math.round(Math.sin(S.t * 3) * 2);
@@ -838,6 +856,13 @@ function startTarget() {
   }
 
   function hud() {
+    if (Cam.on === true) {   // throw power: fill it to the top and the flag goes
+      const px = WIN.x + WIN.w - 12, py = WIN.y + 60, ph = 90, f = Math.min(1, Cam.power);
+      g.fillStyle = 'rgba(0,0,0,.5)'; g.fillRect(px - 4, py, 8, ph);
+      g.fillStyle = f >= 1 ? '#ffffff' : f > .7 ? '#ffe040' : '#7dff9a'; g.fillRect(px - 3, py + ph - f * ph, 6, f * ph);
+      g.fillStyle = '#ff2bd6'; g.fillRect(px - 5, py, 10, 2);
+    }
+    if (S.sensShow > 0) { S.sensShow -= .02; number(CONFIG.flickSpeed.toFixed(2), WIN.x + WIN.w - 20, WIN.y + 24, '#fff'); }
     // flags left (bottom of the window)
     for (let i = 0; i < CONFIG.flags; i++) { if (i < S.left) flag(g, S.me, WIN.x + 6 + i * 15, WIN.y + WIN.h - 14, 12, 8); else { g.fillStyle = 'rgba(0,0,0,.4)'; g.fillRect(WIN.x + 6 + i * 15, WIN.y + WIN.h - 14, 12, 8); } }
     // ring sectors
