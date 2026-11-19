@@ -63,7 +63,7 @@ const REACTIONS = {
   china: ['usa', 'northkorea'],    saudi: ['usa', 'france'],        northkorea: ['russia', 'china'],
 };
 
-const CONFIG = { flags: 7, sectors: 6, radius: 84, camMinPixels: 8, flickSpeed: 1.6, growThrow: 1.45, camTolerance: 90 };
+const CONFIG = { flags: 3, sectors: 3, radius: 84, camMinPixels: 8, flickSpeed: 1.6, growThrow: 1.45, camTolerance: 90 };
 // flickSpeed: sideways speed that counts as a throw (screen-widths per second) · growThrow: how much bigger the phone must get in 0.25 s · camTolerance: colour match after calibration
 
 // Each nation's currency. The coin of the day = how much the currency moved against gold since yesterday.
@@ -336,7 +336,7 @@ function startTarget() {
     return T;
   })();
   const camAim = (x, y) => { const r = CONFIG.radius * .95, k = v => Math.max(0, Math.min(1, (v - .2) / .6)), dx = (k(x) - .5) * 2.2 * r, dy = (k(y) - .5) * 2.2 * r, m = Math.min(1, r / Math.max(1e-6, Math.hypot(dx, dy))); return { x: CX + dx * m, y: CY + dy * m }; }; // always on the wheel
-  Cam.onThrow = (x, y) => { S.signal = 1; if (S.scene === 'duel') { const a = camAim(x, y); throwFlag(a.x, a.y); } };
+  Cam.onThrow = (x, y) => { S.signal = 1; if (S.scene === 'duel') { const a = camAim(x, y); throwFlag(a.x, a.y); } else if (S.t > 1) press(); }; // outside the duel a throw = OK
   // backup triggers: a tap on the phone or the space bar throws at the current aim
   function throwAtAim() { const a = Cam.found ? camAim(Cam.x, Cam.y) : S.aim || { x: CX, y: CY - 70 }; throwFlag(a.x, a.y); Cam.power = 1; }
   function camPreview(x, y, w, h) {
@@ -426,7 +426,7 @@ function startTarget() {
     { kind: 'roulette', rule: 'roulette' },
   ];
   const ALLIES = [['russia', 'northkorea'], ['russia', 'china'], ['china', 'northkorea'], ['usa', 'saudi'], ['france', 'germany'], ['italy', 'spain'], ['usa', 'germany']];
-  const left = () => COUNTRIES.filter(id => id !== S.me && !S.world.conquests[id]);
+  const left = () => COUNTRIES.filter(id => !(S.players || []).includes(id) && !S.world.conquests[id]);
   function outcome(sc, beaten) {
     const free = left();
     if (sc.opens) return sc.opens.filter(id => free.includes(id));
@@ -459,7 +459,7 @@ function startTarget() {
     if (p.y > 226 && p.x > 252 && p.x < 280) return Music.toggleMute();
     if (S.scene === 'pair' && p.x >= 170 && p.x <= 258 && p.y >= 72 && p.y <= 138) return Cam.calibrate((p.x - 170) / 88, (p.y - 72) / 66);
     if (S.scene === 'duel') return throwFlag(p.x, p.y);
-    if (S.scene === 'pickMe' || S.scene === 'pickRival') {
+    if (S.scene === 'pickMe' || S.scene === 'pickMe2' || S.scene === 'pickRival') {
       const i = Math.floor((p.x - 8) / 34);
       if (i >= 0 && i < 9 && p.y > 60 && p.y < 200) { if (S.scene === 'pickRival' && !allowed(COUNTRIES[i])) return; if (i === S.sel) press(); else S.sel = i; return; }
     }
@@ -473,11 +473,11 @@ function startTarget() {
     if (e.key === 'Enter' || e.key === ' ') press();
   });
   function allowed(id) {
-    if (id === S.me) return false;
-    const open = (S.world.open || []).filter(r => !S.world.conquests[r] && r !== S.me);
+    if ((S.players || []).includes(id)) return false;
+    const open = (S.world.open || []).filter(r => !S.world.conquests[r] && !(S.players || []).includes(r));
     return open.length ? open.includes(id) : !S.world.conquests[id];
   }
-  function move(d) { if (S.scene === 'pickMe') S.sel = (S.sel + d + 9) % 9; if (S.scene === 'pickRival') { for (let i = 0; i < 9; i++) { S.sel = (S.sel + d + 9) % 9; if (allowed(COUNTRIES[S.sel])) break; } } }
+  function move(d) { if (S.scene === 'pickMe' || S.scene === 'pickMe2') S.sel = (S.sel + d + 9) % 9; if (S.scene === 'pickRival') { for (let i = 0; i < 9; i++) { S.sel = (S.sel + d + 9) % 9; if (allowed(COUNTRIES[S.sel])) break; } } }
 
   function go(sc) { S.scene = sc; S.t = 0; if (sc === 'pair') Cam.start(); updateQR(); if (sc === 'crash') Music.crash(); }
   function press() {
@@ -485,19 +485,42 @@ function startTarget() {
     if (sc === 'off') { Modem.unlock(); go('splash'); }
     else if (sc === 'splash' || sc === 'dial') { Modem.stop(); Music.start(); go('title'); } // skip the intro
     else if (sc === 'title') { Music.start(); S.sel = 0; go('pickMe'); }
-    else if (sc === 'pickMe') { S.me = COUNTRIES[S.sel]; S.sel = 0; go('pickRival'); if (!allowed(COUNTRIES[S.sel])) move(1); }
-    else if (sc === 'pickRival') { if (!allowed(COUNTRIES[S.sel])) return; S.rival = COUNTRIES[S.sel]; go('pair'); sendFlag(); }
+    else if (sc === 'pickMe') { S.players = [COUNTRIES[S.sel], null]; S.me = S.players[0]; S.sel = (S.sel + 1) % 9; go('pickMe2'); }
+    else if (sc === 'pickMe2') { const id = COUNTRIES[S.sel]; S.players[1] = id === S.players[0] ? null : id; S.me = S.players[0]; S.sel = 0; go('pickRival'); if (!allowed(COUNTRIES[S.sel])) move(1); } // picking yourself again = play alone
+    else if (sc === 'pickRival') { if (!allowed(COUNTRIES[S.sel])) return; S.rival = COUNTRIES[S.sel]; S.turn = 0; S.scores = [0, 0]; S.closed = [false, false]; S.me = S.players[0]; Cam.on === true ? coins() : go('pair'); sendFlag(); }
     else if (sc === 'pair') coins(); // no phone: play solo with the mouse
-    else if (sc === 'coins' && S.t > 2.2) duel();
-    else if (sc === 'crash' && S.t > 1.2) duel();
-    else if (sc === 'win' && S.t > 4) { go(Object.keys(S.world.conquests).length >= 8 ? 'ending' : 'pickRival'); if (S.scene === 'pickRival' && !allowed(COUNTRIES[S.sel])) move(1); }
+    else if (sc === 'coins' && S.t > 1.5) duel();
+    else if (sc === 'crash' && S.t > 1.5) endTurn();
+    else if (sc === 'switch' && S.t > 1.5) duel();
+    else if (sc === 'result' && S.t > 1.5) afterResult();
+    else if (sc === 'win' && S.t > 3) { S.me = S.players[0]; go(Object.keys(S.world.conquests).length >= 9 - S.players.filter(Boolean).length ? 'ending' : 'pickRival'); if (S.scene === 'pickRival' && !allowed(COUNTRIES[S.sel])) move(1); }
     else if (sc === 'ending' && S.t > 2) { S.world = { conquests: {}, open: [], cards: [] }; save(); go('title'); }
+  }
+
+  // turns: each player throws 3 flags at the same leader; touching the leader ends your turn with 0
+  function endTurn() {
+    if (S.players[1] && S.turn === 0) { S.turn = 1; S.me = S.players[1]; sendFlag(); go('switch'); }
+    else go('result');
+  }
+  function afterResult() {
+    const [a, b] = S.scores;
+    if (!S.players[1]) { if (S.closed[0]) conquer(S.players[0]); else { S.turn = 0; duel(); } return; }   // alone: close the triangle to win
+    if (a === b) { S.turn = 0; S.me = S.players[0]; sendFlag(); duel(); return; }                     // tie: play again
+    conquer(S.players[a > b ? 0 : 1]);
+  }
+  function conquer(winner) {
+    S.me = winner;
+    S.world.conquests[S.rival] = winner;
+    const al = S.world.alliance; if (al && al.includes(S.rival)) al.forEach(id => S.world.conquests[id] = winner); // the alliance falls together
+    S.scenario = scenarioAfter(S.rival); applyScenario(S.scenario);
+    S.world.cards = (S.world.cards || []).concat({ kind: S.scenario.kind, from: S.rival, open: S.scenario.open });
+    save(); go('win');
   }
 
   function coins() { decide(); go('coins'); }
 
   function duel() {
-    go('duel'); Music.start();
+    go('duel'); Music.start(); S.me = S.players[S.turn]; sendFlag();
     S.flights = []; S.planted = []; S.left = CONFIG.flags; S.influence = 0; S.wheel = 0;
     // the weaker coin gets the advantage: the wheel starts still
     S.hold = S.meFirst ? 1.5 : 0;
@@ -538,6 +561,11 @@ function startTarget() {
     const sc = S.scene, prog = S.loaded / 10;
     if (sc === 'splash' && ((S.t > 2.2 && prog >= 1) || S.t > 6)) { Modem.play(); go('dial'); }
     else if (sc === 'dial' && ((S.t > 3 && S.dataDone >= 10) || S.t > 7)) { Modem.stop(); Music.start(); go('title'); }
+    const AUTO = { coins: 3.2, crash: 2.8, switch: 3.5, result: 3.5, win: 5 };          // nobody has to touch the laptop
+    if (AUTO[S.scene] && S.t > AUTO[S.scene]) press();
+    if (S.scene === 'pickRival' && Cam.found) {                                     // choose the next rival by pointing the phone
+      const list = COUNTRIES.filter(allowed); if (list.length) S.sel = COUNTRIES.indexOf(list[Math.min(list.length - 1, Math.floor(Cam.x * list.length))]);
+    }
     if (S.scene !== 'duel') return;
     if (S.hold > 0) S.hold -= dt;
     else {
@@ -551,7 +579,7 @@ function startTarget() {
       const l = toWheel(f.tx, f.ty);
       if (hitsLeader(l)) {
         S.crash = { x: f.tx, y: f.ty, cracks: Array.from({ length: 14 }, () => ({ a: Math.random() * Math.PI * 2, r: 30 + Math.random() * 140, k: Math.random() })) };
-        go('crash'); return;
+        S.scores[S.turn] = 0; go('crash'); return;
       }
       const d = Math.hypot(l.x, l.y);
       if (d <= CONFIG.radius) { S.planted.push({ l, t: 0 }); S.influence += Math.max(0, Math.round(100 - d)); }
@@ -559,13 +587,8 @@ function startTarget() {
     }
     S.flights = S.flights.filter(f => !f.done);
     S.planted.forEach(p => p.t += dt);
-    if (sectors().every(Boolean)) {
-      S.world.conquests[S.rival] = S.me;
-      const al = S.world.alliance; if (al && al.includes(S.rival)) al.forEach(id => S.world.conquests[id] = S.me); // the alliance falls together
-      S.scenario = scenarioAfter(S.rival); applyScenario(S.scenario);
-      S.world.cards = (S.world.cards || []).concat({ kind: S.scenario.kind, from: S.rival, open: S.scenario.open });
-      save(); go('win');
-    } else if (S.left === 0 && !S.flights.length) { S.crash = null; go('crash'); }
+    if (sectors().every(Boolean)) { S.closed[S.turn] = true; S.scores[S.turn] = S.influence + 200; endTurn(); }   // triangle closed: +200
+    else if (S.left === 0 && !S.flights.length && !S.falling.length) { S.scores[S.turn] = S.influence; endTurn(); }
   }
 
   /* ---------------- drawing ---------------- */
@@ -765,10 +788,38 @@ function startTarget() {
       if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#fff'; g.fillRect(WIN.x + 10, 196, 10, 14); g.fillStyle = '#1f4fb8'; g.fillRect(WIN.x + 14, 196, 2, 5); }
       return;
     }
+    if (sc === 'pickMe2') {
+      groupShot(false);
+      // player 1 already chosen; pick player 2 (picking player 1 again = play alone)
+      const p1 = S.players[0], i1 = COUNTRIES.indexOf(p1); g.strokeStyle = '#ff2bd6'; g.lineWidth = 2; g.strokeRect(8 + i1 * 34 + 1, 82, 32, 102);
+      flag(g, p1, 100, 22, 34, 23); number(1, 117, 56, '#fff');
+      if (COUNTRIES[S.sel] === p1) { g.fillStyle = '#fff'; g.beginPath(); g.arc(197, 28, 5, 0, Math.PI * 2); g.fill(); g.fillRect(190, 35, 14, 10); }   // one player
+      else { flag(g, COUNTRIES[S.sel], 180, 22, 34, 23); number(2, 197, 56, '#fff'); }
+      g.fillStyle = '#fff'; g.fillRect(152, 32, 12, 3); g.fillRect(156, 28, 3, 11);
+      return;
+    }
+    if (sc === 'switch' || sc === 'result') {
+      desktop(S.rival); windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, S.rival);
+      g.fillStyle = 'rgba(10,20,60,.82)'; g.fillRect(WIN.x + 2, WIN.y + 12, WIN.w - 4, WIN.h - 14);
+      const two = !!S.players[1];
+      [0, 1].forEach(i => {
+        if (!two && i === 1) return;
+        const x = two ? (i ? 205 : 115) : 160, win = sc === 'result' && (two ? S.scores[i] > S.scores[1 - i] : S.closed[0]);
+        const s = win ? 1 + Math.sin(S.t * 6) * .08 + .2 : 1, w = 48 * s, h = 32 * s;
+        flag(g, S.players[i], x - w / 2, 70 - h / 2, w, h);
+        number(sc === 'switch' && i === 1 ? '?' : S.scores[i], x, 112, win ? '#ffe680' : '#fff');
+        if (S.closed[i]) { g.strokeStyle = '#7dff9a'; g.lineWidth = 2; g.beginPath(); g.moveTo(x - 8, 130); g.lineTo(x, 122); g.lineTo(x + 8, 130); g.closePath(); g.stroke(); } // triangle closed
+      });
+      if (sc === 'switch') {   // the phone passes from player 1 to player 2
+        const k = Math.min(1, S.t / 1.5), px = 115 + 90 * (1 - Math.cos(k * Math.PI)) / 2, py = 160 - Math.sin(k * Math.PI) * 18;
+        g.fillStyle = '#222'; g.fillRect(px - 9, py - 15, 18, 30); g.fillStyle = '#ff2bd6'; g.fillRect(px - 7, py - 13, 14, 26); flag(g, S.players[1], px - 5, py - 4, 10, 7);
+      }
+      return;
+    }
     if (sc === 'pickMe' || sc === 'pickRival') {
       groupShot(sc === 'pickRival');
-      if (sc === 'pickMe') flag(g, COUNTRIES[S.sel], 140, 18, 40, 27);
-      else if (S.me) { flag(g, S.me, 120, 22, 28, 19); g.fillStyle = '#fff'; g.fillRect(156, 30, 8, 3); flag(g, COUNTRIES[S.sel], 172, 22, 28, 19); }
+      if (sc === 'pickMe') { flag(g, COUNTRIES[S.sel], 140, 18, 40, 27); number(1, 160, 56, '#fff'); }
+      else if (S.players) { const ps = S.players.filter(Boolean); ps.forEach((p, i) => flag(g, p, 112 - i * 22 + (ps.length === 1 ? 8 : 0), 22, 18, 12)); g.fillStyle = '#fff'; g.fillRect(150, 30, 10, 3); flag(g, COUNTRIES[S.sel], 168, 18, 36, 24); }
       return;
     }
     if (sc === 'coins') {
@@ -856,6 +907,7 @@ function startTarget() {
   }
 
   function hud() {
+    if (S.players && S.players[1]) { flag(g, S.me, WIN.x + 6, WIN.y + 56, 20, 13); number(S.turn + 1, WIN.x + 16, WIN.y + 80, '#fff'); }
     if (Cam.on === true) {   // throw power: fill it to the top and the flag goes
       const px = WIN.x + WIN.w - 12, py = WIN.y + 60, ph = 90, f = Math.min(1, Cam.power);
       g.fillStyle = 'rgba(0,0,0,.5)'; g.fillRect(px - 4, py, 8, ph);
