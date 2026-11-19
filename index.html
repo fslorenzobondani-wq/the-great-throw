@@ -209,7 +209,7 @@ function startTarget() {
   // gold today vs yesterday, priced in every currency (free currency-api on jsDelivr, no key)
   const iso = d => d.toISOString().slice(0, 10);
   const goldOn = date => fetch(`https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${date}/v1/currencies/xau.json`).then(r => r.json()).then(d => d.xau);
-  Promise.all([goldOn('latest'), goldOn(iso(new Date(Date.now() - 2 * 864e5)))]).then(([now, before]) => {
+  Promise.all([goldOn('latest'), goldOn(iso(new Date(Date.now() - 864e5))).catch(() => goldOn(iso(new Date(Date.now() - 2 * 864e5))))]).then(([now, before]) => {
     Object.keys(GOLD).forEach(c => { if (now[c] && before[c]) GOLD[c] = (now[c] / before[c] - 1) * 100; });
   }).catch(() => {}).finally(() => S.dataDone++);
   { const a = document.getElementById('music'); let once = false; const ok = () => { if (!once) { once = true; S.loaded++; } }; a.addEventListener('canplaythrough', ok); a.addEventListener('error', ok); setTimeout(ok, 4000); }
@@ -220,11 +220,11 @@ function startTarget() {
   });
   // strength of a coin: if gold got more expensive in your currency, your coin got weaker
   const strength = id => CURRENCY[id] ? -GOLD[CURRENCY[id]] : null;
-  // who gets the advantage: the weaker coin; same currency → toss a coin
+  // who starts: the coin that grew most today against gold; same currency or a censored coin → toss a coin
   function decide() {
     const a = strength(S.me), b = strength(S.rival);
-    S.toss = a !== null && b !== null && CURRENCY[S.me] === CURRENCY[S.rival];
-    S.meFirst = S.toss ? Math.random() < .5 : (b === null ? true : (a === null ? false : a <= b));
+    S.toss = a === null || b === null || CURRENCY[S.me] === CURRENCY[S.rival];
+    S.meFirst = S.toss ? Math.random() < .5 : a >= b;
   }
   const clock = (id, withMinutes) => {
     const f = new Intl.DateTimeFormat('en-GB', { timeZone: NATIONS[id].tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
@@ -525,7 +525,7 @@ function startTarget() {
       else { S.sel = 0; if (owner(COUNTRIES[0]) !== null) move(1); }
     }
     else if (sc === 'win' && S.t > 4) nextDuel();
-    else if (sc === 'coins' && S.t > 1.5) duel();
+    else if (sc === 'coins' && S.t > 2.6) duel();
     else if (sc === 'crash' && S.t > 3) endTurn();
     else if (sc === 'switch' && S.t > 1.5) duel();
     else if (sc === 'result' && S.t > 1.5) afterResult();
@@ -559,7 +559,13 @@ function startTarget() {
     S.champ = top[0]; S.me = COUNTRIES.find(id => owner(id) === S.champ && !S.world.conquests[id]) || COUNTRIES.find(id => owner(id) === S.champ); go('ending');
   }
 
-  function coins() { decide(); S.adv = S.meFirst ? S.duelists[0] : S.duelists[1]; go('coins'); }
+  function coins() {
+    decide(); S.adv = S.meFirst ? S.duelists[0] : S.duelists[1];
+    if (S.adv === S.duelists[1] && owner(S.duelists[1]) !== null) {   // the winning coin throws first
+      S.duelists.reverse(); S.me = S.duelists[0]; S.rival = S.duelists[1]; S.meFirst = true; sendFlag();
+    }
+    go('coins');
+  }
 
   function duel() {
     go('duel'); Music.start();
@@ -603,7 +609,7 @@ function startTarget() {
     const sc = S.scene, prog = S.loaded / 10;
     if (sc === 'splash' && ((S.t > 2.2 && prog >= 1) || S.t > 6)) { Modem.play(); go('dial'); }
     else if (sc === 'dial' && ((S.t > 3 && S.dataDone >= 10) || S.t > 7)) { Modem.stop(); Music.start(); go('title'); }
-    const AUTO = { coins: 3.2, crash: 5, switch: 3.5, result: 3.5, win: 7 };   // the card stays long enough to read it          // nobody has to touch the laptop
+    const AUTO = { coins: 4.5, crash: 5, switch: 3.5, result: 3.5, win: 7 };   // the card stays long enough to read it          // nobody has to touch the laptop
     if (AUTO[S.scene] && S.t > AUTO[S.scene]) press();
     if (S.scene === 'draft' && Cam.found) {                                         // choose by pointing the phone
       const list = COUNTRIES.filter(id => owner(id) === null); if (list.length) S.sel = COUNTRIES.indexOf(list[Math.min(list.length - 1, Math.floor(Cam.x * list.length))]);
@@ -887,20 +893,29 @@ function startTarget() {
     if (sc === 'coins') {
       desktop(S.rival); windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, S.rival);
       g.fillStyle = 'rgba(10,20,60,.8)'; g.fillRect(WIN.x + 2, WIN.y + 12, WIN.w - 4, WIN.h - 14);
-      flag(g, S.me, 95, 40, 30, 20); flag(g, S.rival, 195, 40, 30, 20);
-      if (S.toss) {
-        // same currency: the coin is tossed
-        const up = Math.min(1, S.t / 1.6), y = 130 - Math.sin(up * Math.PI) * 50;
-        coin(160, y, S.me, 30, false, up < 1 ? S.t * 18 : 0);
-        if (up >= 1) { g.fillStyle = '#ffe680'; g.fillRect(S.meFirst ? 93 : 193, 38, 34, 24); flag(g, S.meFirst ? S.me : S.rival, S.meFirst ? 95 : 195, 40, 30, 20); }
+      flag(g, S.me, 90, 34, 30, 20); badge(owner(S.me), 105, 62); flag(g, S.rival, 200, 34, 30, 20); badge(owner(S.rival), 215, 62);
+      // two gold bars: each currency piles up coins for how much it grew today against gold; the taller pile goes green and starts
+      const L = [105, 215], ids = [S.me, S.rival], first = S.meFirst ? 0 : 1, done = S.t > 2.4;
+      L.forEach(x => { g.fillStyle = '#ffd34a'; g.beginPath(); g.moveTo(x - 20, 196); g.lineTo(x + 20, 196); g.lineTo(x + 25, 208); g.lineTo(x - 25, 208); g.fill(); g.fillStyle = '#b8901e'; g.fillRect(x - 25, 206, 50, 2); });
+      if (S.toss) {   // same currency (or censored): one coin flipped in the air, it lands on a flag
+        const up = Math.min(1, S.t / 1.6), y = 120 - Math.sin(up * Math.PI) * 50;
+        coin(160, y, S.me, 24, false, up < 1 ? S.t * 18 : 0);
+        if (up >= 1) { const x = L[first]; g.fillStyle = '#3fd46b'; g.fillRect(x - 17, 158, 34, 24); flag(g, ids[first], x - 15, 160 + Math.round(Math.sin(S.t * 8)), 30, 20); }
       } else {
-        const a = strength(S.me), b = strength(S.rival), size = v => v === null ? 30 : Math.max(18, Math.min(42, 30 + v * 12 * Math.min(1, S.t)));
-        coin(110, 120, S.me, size(a), S.meFirst); coin(210, 120, S.rival, size(b), !S.meFirst);
-        if (a !== null) number((a >= 0 ? '+' : '') + a.toFixed(2) + '%', 110, 172); if (b !== null) number((b >= 0 ? '+' : '') + b.toFixed(2) + '%', 210, 172);
+        const v = ids.map(strength), n = v.map(k => Math.max(1, Math.min(13, Math.round(5 + k * 10))));   // +0.40% ≈ 9 coins, −0.30% ≈ 2
+        L.forEach((x, i) => {
+          const shown = Math.min(n[i], Math.floor(S.t / .14)), col = !done ? null : i === first ? ['#3fd46b', '#1e8a3c'] : ['#e04040', '#8a1e1e'];
+          for (let k = 0; k < shown; k++) {
+            const y = 192 - k * 7, j = k === shown - 1 && shown < n[i] ? -3 : 0;   // the newest coin drops in
+            g.fillStyle = col ? col[1] : '#8a6418'; g.beginPath(); g.ellipse(x, y + 2 + j, 16, 4, 0, 0, Math.PI * 2); g.fill();
+            g.fillStyle = col ? col[0] : '#e8c25a'; g.beginPath(); g.ellipse(x, y + j, 16, 4, 0, 0, Math.PI * 2); g.fill();
+          }
+          const top = 192 - (shown - 1) * 7;
+          if (shown) { g.fillStyle = col ? col[1] : '#7a5410'; g.font = '900 7px "Arial Black", sans-serif'; g.textAlign = 'center'; g.fillText(SYMBOL[CURRENCY[ids[i]]], x, top + 3); }
+          if (done) number((v[i] >= 0 ? '+' : '') + v[i].toFixed(2) + '%', x, top - 8, i === first ? '#7dff9a' : '#ff8080');
+          if (done && i === first) { const b = Math.round(Math.sin(S.t * 8) * 2); flag(g, ids[i], x - 12, top - 36 + b, 24, 16); }
+        });
       }
-      // gold bar: the yardstick
-      g.fillStyle = '#ffd34a'; g.beginPath(); g.moveTo(148, 200); g.lineTo(172, 200); g.lineTo(176, 210); g.lineTo(144, 210); g.fill();
-      if (S.t > 2.2 && Math.floor(S.t * 2) % 2) { g.fillStyle = '#ffe680'; g.beginPath(); g.moveTo(154, 186); g.lineTo(154, 196); g.lineTo(163, 191); g.fill(); }
       return;
     }
     if (sc === 'duel' || (sc === 'crash' && S.crash && S.t < .7)) {
