@@ -9,6 +9,8 @@
   #stage { position: absolute; inset: 0; margin: auto; aspect-ratio: 4 / 3; max-width: 100vw; max-height: 100vh; overflow: hidden; background: #000; border-radius: 2.5% / 3.3%; }
   #live { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; visibility: hidden;
           filter: saturate(1.5) contrast(1.2) brightness(.92); }
+  #yt { position: absolute; top: 50%; left: 50%; width: 178%; height: 100%; transform: translate(-50%, -50%); border: 0; pointer-events: none; visibility: hidden;
+        filter: saturate(1.5) contrast(1.2) brightness(.92); }   /* 16:9 YouTube video covering the 4:3 screen */
   #screen { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; }
   #fx { position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
         background:
@@ -26,6 +28,7 @@
 <body>
 <div id="stage">
   <video id="live" muted loop playsinline autoplay preload="auto"></video>
+  <iframe id="yt" allow="autoplay; encrypted-media" tabindex="-1" title=""></iframe>
   <canvas id="screen" width="320" height="240"></canvas>
   <div id="qr"></div>
   <audio id="music" src="audio/soundtrack.mp3" loop preload="auto"></audio>
@@ -44,15 +47,15 @@
 // video: a free-licence video of the capital (Wikimedia Commons, credits in README), smaller versions first.
 // None loading = fallback city. Real time stays: local hour tints the video (night / dusk), real rain is drawn on top.
 const NATIONS = {
-  italy:      { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/a/a8/Fontaine_de_Trevi.webm/Fontaine_de_Trevi.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/a/a8/Fontaine_de_Trevi.webm/Fontaine_de_Trevi.webm.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/a/a8/Fontaine_de_Trevi.webm'], lat: 41.90, lon: 12.50,  tz: 'Europe/Rome' },
-  spain:      { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/0/07/Puerta_del_Sol%2C_2012.webm/Puerta_del_Sol%2C_2012.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/0/07/Puerta_del_Sol%2C_2012.webm/Puerta_del_Sol%2C_2012.webm.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/0/07/Puerta_del_Sol%2C_2012.webm'], lat: 40.42, lon: -3.70,  tz: 'Europe/Madrid' },
-  france:     { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/1/12/Eiffel_tower_141853_1.webm/Eiffel_tower_141853_1.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/1/12/Eiffel_tower_141853_1.webm/Eiffel_tower_141853_1.webm.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/1/12/Eiffel_tower_141853_1.webm'], lat: 48.86, lon: 2.35,   tz: 'Europe/Paris' },
-  germany:    { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/2/2d/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/2/2d/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/2/2d/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm'], lat: 52.52, lon: 13.40,  tz: 'Europe/Berlin' },
-  usa:        { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/5/57/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/5/57/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/5/57/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm'], lat: 38.89, lon: -77.03, tz: 'America/New_York' },
-  russia:     { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/b/be/A_view_of_Red_Square_MVI_6782.ogv/A_view_of_Red_Square_MVI_6782.ogv.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/b/be/A_view_of_Red_Square_MVI_6782.ogv/A_view_of_Red_Square_MVI_6782.ogv.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/b/be/A_view_of_Red_Square_MVI_6782.ogv'], lat: 55.75, lon: 37.62,  tz: 'Europe/Moscow' },
-  china:      { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/f/fc/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/f/fc/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/f/fc/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm'], lat: 39.90, lon: 116.40, tz: 'Asia/Shanghai' },
-  saudi:      { video: [], lat: 24.71, lon: 46.68,  tz: 'Asia/Riyadh' },
-  northkorea: { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/4/47/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/4/47/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm.360p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/4/47/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm'], lat: 39.02, lon: 125.75, tz: 'Asia/Pyongyang' },
+  italy:      { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/a/a8/Fontaine_de_Trevi.webm/Fontaine_de_Trevi.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/a/a8/Fontaine_de_Trevi.webm/Fontaine_de_Trevi.webm.240p.vp9.webm'], lat: 41.90, lon: 12.50,  tz: 'Europe/Rome' },
+  spain:      { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/0/07/Puerta_del_Sol%2C_2012.webm/Puerta_del_Sol%2C_2012.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/0/07/Puerta_del_Sol%2C_2012.webm/Puerta_del_Sol%2C_2012.webm.240p.vp9.webm'], lat: 40.42, lon: -3.70,  tz: 'Europe/Madrid' },
+  france:     { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/1/12/Eiffel_tower_141853_1.webm/Eiffel_tower_141853_1.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/1/12/Eiffel_tower_141853_1.webm/Eiffel_tower_141853_1.webm.240p.vp9.webm'], lat: 48.86, lon: 2.35,   tz: 'Europe/Paris' },
+  germany:    { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/2/2d/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/2/2d/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm.240p.vp9.webm'], lat: 52.52, lon: 13.40,  tz: 'Europe/Berlin' },
+  usa:        { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/5/57/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/5/57/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm.240p.vp9.webm'], lat: 38.89, lon: -77.03, tz: 'America/New_York' },
+  russia:     { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/b/be/A_view_of_Red_Square_MVI_6782.ogv/A_view_of_Red_Square_MVI_6782.ogv.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/b/be/A_view_of_Red_Square_MVI_6782.ogv/A_view_of_Red_Square_MVI_6782.ogv.240p.vp9.webm'], lat: 55.75, lon: 37.62,  tz: 'Europe/Moscow' },
+  china:      { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/f/fc/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/f/fc/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm.240p.vp9.webm'], lat: 39.90, lon: 116.40, tz: 'Asia/Shanghai' },
+  saudi:      { video: [], yt: { id: 'l9bU24Nu-cc', from: 20, to: 230 }, lat: 24.71, lon: 46.68,  tz: 'Asia/Riyadh' },
+  northkorea: { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/4/47/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/4/47/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm.240p.vp9.webm'], lat: 39.02, lon: 125.75, tz: 'Asia/Pyongyang' },
 };
 const COUNTRIES = Object.keys(NATIONS);
 
@@ -231,21 +234,33 @@ function startTarget() {
   // --- live camera of the square
   // --- video of the capital: try each source until one plays; otherwise the drawn city
   const Live = (() => {
-    const v = document.getElementById('live'); v.muted = true;
-    let want = null, list = [], idx = 0, playing = false; const dead = {};
-    v.addEventListener('playing', () => { playing = true; v.style.visibility = 'visible'; });
+    const v = document.getElementById('live'), yt = document.getElementById('yt'); v.muted = true;
+    let want = null, list = [], idx = 0, playing = false, timer = 0; const dead = {};
+    v.addEventListener('playing', () => { playing = true; clearTimeout(timer); v.style.visibility = 'visible'; });
     v.addEventListener('error', () => next());
-    function next() {
-      playing = false; v.style.visibility = 'hidden';
+    function next() {   // try the next file; if one is not playing within 8 s, skip it
+      playing = false; v.style.visibility = 'hidden'; clearTimeout(timer);
       if (idx >= list.length) { if (want) dead[want] = true; v.removeAttribute('src'); return; }
       v.src = list[idx++]; v.play().catch(() => {});
+      timer = setTimeout(() => { if (!playing) next(); }, 8000);
+    }
+    function showYT(c) {   // muted, no controls, loops a stretch with no people
+      v.pause(); v.style.visibility = 'hidden';
+      const src = `https://www.youtube.com/embed/${c.id}?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&iv_load_policy=3&loop=1&playlist=${c.id}&start=${c.from}&end=${c.to}&playsinline=1&rel=0`;
+      if (yt.src !== src) yt.src = src;
+      yt.onload = () => setTimeout(() => { if (want && NATIONS[want].yt) { playing = true; yt.style.visibility = 'visible'; } }, 1800);   // hide YouTube's own title fade-in
     }
     function show(id) {
       if (id === want) return;
-      want = id; idx = 0; list = (id && NATIONS[id].video) || [];
-      if (!id || !list.length || dead[id]) { playing = false; v.style.visibility = 'hidden'; v.pause(); return; }
+      want = id; idx = 0; list = (id && NATIONS[id].video) || []; clearTimeout(timer);
+      yt.style.visibility = 'hidden'; playing = false;
+      if (id && NATIONS[id].yt) return showYT(NATIONS[id].yt);
+      if (yt.src) yt.removeAttribute('src');
+      if (!id || !list.length || dead[id]) { v.style.visibility = 'hidden'; v.pause(); return; }
       next();
     }
+    // some browsers block autoplay until the first click: try again then
+    addEventListener('pointerdown', () => { if (want && !playing && v.src) v.play().catch(() => {}); });
     return { show, isPlaying: id => playing && want === id };
   })();
   const live = id => Live.show(id);

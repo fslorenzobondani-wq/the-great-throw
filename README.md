@@ -29,7 +29,7 @@ Behind each duel plays a free-licence video of the capital from Wikimedia Common
 | Moscow | [A view of Red Square MVI 6782.ogv](https://commons.wikimedia.org/wiki/File:A_view_of_Red_Square_MVI_6782.ogv) |
 | Beijing | [天安门等地下半旗悼念李克强同志.webm](https://commons.wikimedia.org/wiki/File:天安门等地下半旗悼念李克强同志.webm) — China News Service |
 | Pyongyang | [Donny Ferguson - 360 degree view of Pyongyang … Juche Tower.webm](https://commons.wikimedia.org/wiki/File:Donny_Ferguson_-_360_degree_view_of_Pyongyang,_North_Korea,_from_atop_the_Juche_Tower.webm) — Donny Ferguson |
-| Riyadh | no free video found: drawn city |
+| Riyadh | [Riyadh, Saudi Arabia 4K by drone](https://www.youtube.com/watch?v=l9bU24Nu-cc) — Drone Travel (YouTube, embedded muted with YouTube's player; aerial shots only, no people). The only Riyadh videos on Commons are White House footage with real politicians, so they were not used. |
 
 Each file keeps its own licence (see its Commons page).
 

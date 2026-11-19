@@ -72,6 +72,7 @@ Vibe Coding final project (Elisava MAIAD 26/27). One entry per version: what I w
 | --- | --- | --- |
 | GitHub Pages | hosting | Microsoft |
 | Wikimedia Commons | free-licence videos of the capitals | Wikimedia Foundation |
+| YouTube (embedded player) | aerial video of Riyadh | Google |
 | PeerJS (public server) | phone ↔ laptop link | open-source project |
 | qrcode-generator (jsDelivr) | QR code for the phone | open source / jsDelivr |
 | currency-api (jsDelivr) | every currency against gold | open source / jsDelivr |
