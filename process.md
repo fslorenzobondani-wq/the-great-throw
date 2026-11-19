@@ -48,14 +48,33 @@ Vibe Coding final project (Elisava MAIAD 26/27). One entry per version: what I w
 
 **Messages used:** to fill in.
 
+## v6 · 2026-11-19
+**Wanted:** a game that runs on its own and is clear to an audience: the phone as controller seen by the webcam, real data that matters, scenario cards that tell real politics, a match for several players, a bigger reaction when you hit a leader, the city videos in full view.
+
+**Decisions (and why):**
+- **Soundtrack as an mp3 in the repository**, played with Web Audio: a real visualiser in the taskbar and a tape-stop when the leader is hit. The YouTube media player was ugly on screen and has been removed. Lorenzo chose to host the file knowing the repository is public.
+- **Intro like an early-2000s computer** (boot, modem dial-up), then a title with the skyline. The globe was removed from the title: too many things.
+- **Currency instead of petrol:** every nation's coin is measured against gold, today vs two days ago. The weaker coin gets the advantage (the wheel starts still). Same currency → coin toss. North Korea's coin is censored.
+- **Phone = controller, webcam = eye:** the phone shows its flag full screen on a pink frame; the laptop webcam follows the pink to aim and detects the throw when the phone moves forward fast or flicks. Swipe and touchpad throws were tried first and did not work well enough. Backups: Space, a tap on the phone, the mouse.
+- **City videos from Wikimedia Commons** (free licences) instead of live cams, which were unreliable. Local time tints them, real rain falls on them. No real faces: Riyadh has no video.
+- **Match for 2–4 players with one phone passed hand to hand:** several pink phones would confuse the webcam. Everyone shares out the 9 countries in turn at the start; leftovers stay neutral. After that nobody chooses any more: the scenario card of the winning country decides the next duel (first duel: roulette).
+- **Duel:** both countries throw 3 flags at each other's leader; touching the leader ends your turn with 0; closing the triangle gives +200. The loser's country flies the winner's flag. 5 duels, then most countries wins.
+- **Text, in English, only where it explains:** a news headline under every scenario card (why these two fight, nations only, nobody quoted) and the leader-hit screen (BOOM!, then WORLD WAR III). New card: Cyber Attack.
+- **Duel without the Windows window:** the city video full screen with the target on top; the Windows look stays everywhere else, so the contrast is felt.
+- **Every in-between screen moves on by itself** (or with a throw gesture): the player is standing with the phone, away from the laptop.
+
+**Known limits:** the phone ↔ laptop link (PeerJS), the city videos and the currency data cannot be tested from Claude's environment, only on Lorenzo's devices; world map after each duel still to do; brief and README partly outdated; versions v2–v5 use old file names.
+
+**Messages used:** to fill in.
+
 ## Dependency map
 | Service | What for | Owned by |
 | --- | --- | --- |
 | GitHub Pages | hosting | Microsoft |
-| YouTube (IFrame API, embeds) | soundtrack, live cams of the squares | Google |
+| Wikimedia Commons | free-licence videos of the capitals | Wikimedia Foundation |
 | PeerJS (public server) | phone ↔ laptop link | open-source project |
 | qrcode-generator (jsDelivr) | QR code for the phone | open source / jsDelivr |
-| open.er-api.com | daily exchange rates | ExchangeRate-API |
+| currency-api (jsDelivr) | every currency against gold | open source / jsDelivr |
 | Open-Meteo | real weather of each capital | Open-Meteo (open data) |
 | Higgsfield | character generation | Higgsfield AI |
 | Claude | design and code, in dialogue | Anthropic |
