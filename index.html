@@ -480,19 +480,22 @@ function startTarget() {
   // players own countries: S.world.owner[id] = 0..3 (null = neutral). S.world.conquests[id] = flag flying over it
   const PCOL = ['#ff2bd6', '#3ad8ff', '#ffe040', '#7dff9a'];
   const owner = id => { const o = S.world.owner[id]; return o === undefined ? null : o; };
-  const enemies = (a, b) => owner(a) !== owner(b) && (owner(a) !== null || owner(b) !== null);
+  const out = id => !!(S.world.out || {})[id];
+  const enemies = (a, b) => owner(a) !== null && owner(b) !== null && owner(a) !== owner(b) && !out(a) && !out(b);
   const flagOf = id => S.world.conquests[id] || id;
   const pick = a => a[Math.floor(Math.random() * a.length)];
   // after a duel: a real story of the winning country points at its next rival; no story left → roulette
   function scenarioAfter(winner) {
     const stories = winner ? (STORIES[winner] || []).map(sc => ({ sc, o: sc.opens.filter(id => id !== winner && enemies(winner, id)) })).filter(x => x.o.length) : [];
     if (winner && owner(winner) !== null && stories.length) { const { sc, o } = pick(stories); return { kind: sc.kind, from: winner, a: winner, b: pick(o), open: o }; }
-    const pairs = []; COUNTRIES.forEach(a => COUNTRIES.forEach(b => { if (a < b && enemies(a, b)) pairs.push(owner(a) === null ? [b, a] : [a, b]); }));
-    const pvp = pairs.filter(([a, b]) => owner(b) !== null);   // the roulette prefers player against player
-    const [a, b] = pick(pvp.length ? pvp : pairs); return { kind: 'roulette', from: a, a, b, open: [b] };
+    const pairs = []; COUNTRIES.forEach(a => COUNTRIES.forEach(b => { if (a < b && enemies(a, b)) pairs.push([a, b]); }));
+    if (!pairs.length) return null;   // nobody left to fight
+    const [a, b] = pick(pairs); return { kind: 'roulette', from: a, a, b, open: [b] };
   }
   function players() { return [...Array(S.n).keys()]; }
-  function countOf(p) { return COUNTRIES.filter(id => owner(id) === p).length; }
+  function countOf(p) { return COUNTRIES.filter(id => owner(id) === p && !out(id)).length; }
+  const total = p => (S.total || [])[p] || 0;
+  const MAXTURN = CONFIG.flags * 100 + 200;   // best possible turn: every flag dead centre + triangle
 
   // --- laptop input
   const pos = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
@@ -530,7 +533,7 @@ function startTarget() {
     else if (sc === 'title') { Music.start(); S.sel = 0; go('rules'); }
     else if (sc === 'rules' && S.t > 1.5) go('players');
     else if (sc === 'players') {                       // how many players: 2, 3 or 4
-      S.n = S.sel + 2; S.world = { conquests: {}, owner: {}, cards: [] }; S.picker = 0; S.duels = 0; S.sel = 0; S.me = null; go('draft');
+      S.n = S.sel + 2; S.world = { conquests: {}, owner: {}, cards: [], out: {} }; S.total = Array(S.sel + 2).fill(0); S.lastChance = null; S.picker = 0; S.duels = 0; S.sel = 0; S.me = null; go('draft');
     }
     else if (sc === 'draft') {                         // everybody takes a country in turn until they run out; leftovers stay neutral
       const id = COUNTRIES[S.sel]; if (owner(id) !== null) return;
@@ -544,6 +547,7 @@ function startTarget() {
     else if (sc === 'crash' && S.t > 3) endTurn();
     else if (sc === 'switch' && S.t > 1.5) duel();
     else if (sc === 'result' && S.t > 1.5) afterResult();
+    else if (sc === 'lastchance' && S.t > 2) duel();
     else if (sc === 'ending' && S.t > 2) { S.me = null; go('title'); }
   }
 
@@ -554,29 +558,47 @@ function startTarget() {
     S.me = c.a; S.rival = c.b; S.world.cards = (S.world.cards || []).concat({ kind: c.kind, from: c.from, open: c.open }); sendFlag(); coins();
   }
   function endTurn() {
-    if (S.turn === 0 && owner(S.duelists[1]) !== null) { S.turn = 1; S.me = S.duelists[1]; S.rival = S.duelists[0]; sendFlag(); go('switch'); }
+    if (S.turn === 0 && !S.lastChance) { S.turn = 1; S.me = S.duelists[1]; S.rival = S.duelists[0]; sendFlag(); go('switch'); }
     else go('result');
   }
   function afterResult() {
-    const [a, b] = S.duelists, two = owner(b) !== null;
-    if (two && S.scores[0] === S.scores[1]) { S.turn = 0; S.me = a; S.rival = b; sendFlag(); duel(); return; }   // tie: play again
-    const win = two ? (S.scores[0] > S.scores[1] ? a : b) : (S.closed[0] ? a : null), lose = win === a ? b : a;
-    S.duels++;
-    if (win) { S.world.owner[lose] = owner(win); S.world.conquests[lose] = flagOf(win); }   // the beaten country flies the winner's flag
-    S.last = win;
-    const alive = players().filter(p => countOf(p) > 0);
-    if (alive.length === 1 && COUNTRIES.every(id => owner(id) === alive[0]) || S.duels >= CONFIG.duels) return finish();
-    S.scenario = scenarioAfter(win || b); go('win');
+    const [a, b] = S.duelists;
+    if (S.lastChance) return afterLastChance();
+    if (S.scores[0] === S.scores[1]) { S.turn = 0; S.me = a; S.rival = b; sendFlag(); duel(); return; }   // tie: play again
+    const win = S.scores[0] > S.scores[1] ? a : b, lose = win === a ? b : a;
+    S.total[owner(a)] += S.scores[0]; S.total[owner(b)] += S.scores[1];   // every point counts for the team
+    S.world.out[lose] = true; S.world.beatenBy = { ...(S.world.beatenBy || {}), [lose]: owner(win) };   // the beaten country goes grey
+    S.duels++; S.last = win;
+    const next = S.duels < CONFIG.duels ? scenarioAfter(win) : null;
+    if (!next) return finish();
+    S.scenario = next; go('win');
   }
-  function finish() {   // most countries wins; the winner's home flag covers the screen
-    const best = Math.max(...players().map(countOf)), top = players().filter(p => countOf(p) === best);
-    if (top.length > 1 && S.duels < CONFIG.duels + 3) { S.scenario = scenarioAfter(S.last || S.duelists[1]); go('win'); return; }   // draw: one more duel
-    S.champ = top[0]; S.me = COUNTRIES.find(id => owner(id) === S.champ && !S.world.conquests[id]) || COUNTRIES.find(id => owner(id) === S.champ); go('ending');
+  // after the last duel: the spare (neutral) country gives the last team ONE more turn, only if it can really still win.
+  // To turn it around it must close the triangle AND beat the gap: a few lucky far throws are never enough.
+  function finish() {
+    const top = Math.max(...players().map(total)), leader = players().find(p => total(p) === top);
+    const spare = COUNTRIES.find(id => owner(id) === null);
+    if (spare && !S.lastChanceDone) {
+      const cand = players().filter(p => p !== leader && top - total(p) < 100).sort((p, q) => total(p) - total(q));   // one flag scores at most 100: only a gap under 100 can really be turned around
+      if (cand.length) {
+        const t = cand[0], target = COUNTRIES.find(id => owner(id) === leader && !out(id)) || COUNTRIES.find(id => owner(id) === leader);
+        S.lastChanceDone = true; S.lastChance = { team: t, id: spare, need: top - total(t) + 1, leader };
+        S.world.owner[spare] = t;   // the spare country plays for the team that is behind
+        S.duelists = [spare, target]; S.turn = 0; S.scores = [0, 0]; S.closed = [false, false]; S.me = spare; S.rival = target; S.adv = spare; sendFlag();
+        go('lastchance'); return;
+      }
+    }
+    S.champ = leader; S.me = COUNTRIES.find(id => (S.startOwner || {})[id] === leader) || S.me; go('ending');
+  }
+  function afterLastChance() {
+    const c = S.lastChance, ok = S.scores[0] >= c.need;
+    if (ok) S.total[c.team] += S.scores[0];
+    S.lastChance = null; S.lastChanceResult = ok; finish();
   }
 
   function coins() {
     decide(); S.adv = S.meFirst ? S.duelists[0] : S.duelists[1];
-    if (S.adv === S.duelists[1] && owner(S.duelists[1]) !== null) {   // the winning coin throws first
+    if (S.adv === S.duelists[1]) {   // the winning coin throws first
       S.duelists.reverse(); S.me = S.duelists[0]; S.rival = S.duelists[1]; S.meFirst = true; sendFlag();
     }
     go('coins');
@@ -584,7 +606,7 @@ function startTarget() {
 
   function duel() {
     go('duel'); Music.start();
-    S.flights = []; S.planted = []; S.left = CONFIG.flags; S.influence = 0; S.wheel = 0;
+    S.flights = []; S.planted = []; S.left = S.lastChance ? 1 : CONFIG.flags; S.influence = 0; S.wheel = 0;
     // the weaker coin gets the advantage: the wheel starts still
     S.hold = S.adv === S.me ? 1.5 : 0;
     S.falling = [];
@@ -625,7 +647,7 @@ function startTarget() {
     if (sc === 'splash' && ((S.t > 2.2 && prog >= 1) || S.t > 6)) { Modem.play(); go('dial'); }
     else if (sc === 'dial' && ((S.t > 3 && S.dataDone >= 10) || S.t > 7)) { Modem.stop(); Music.start(); go('title'); }
     S.resend = (S.resend || 0) + dt; if (S.resend > 1.2) { S.resend = 0; sendFlag(); }
-    const AUTO = { rules: 25, ending: 15, coins: 4.5, crash: 5, switch: 3.5, result: 3.5, win: 7 };   // the card stays long enough to read it          // nobody has to touch the laptop
+    const AUTO = { lastchance: 6, rules: 25, ending: 15, coins: 4.5, crash: 5, switch: 3.5, result: 3.5, win: 7 };   // the card stays long enough to read it          // nobody has to touch the laptop
     if (AUTO[S.scene] && S.t > AUTO[S.scene]) press();
     if (S.scene === 'draft' && Cam.found) {                                         // choose by pointing the phone
       const list = COUNTRIES.filter(id => owner(id) === null); if (list.length) S.sel = COUNTRIES.indexOf(list[Math.min(list.length - 1, Math.floor(Cam.x * list.length))]);
@@ -697,7 +719,7 @@ function startTarget() {
         const step = Math.min(23, (218 - heads * 12) / Math.max(1, rows)); let y = 4;
         list.forEach(gr => {
           if (!gr.ids.length) return;
-          badge(gr.p, x + 14, y + 5); y += 12;
+          badge(gr.p, x + 6, y + 5); if (gr.p !== null) number(total(gr.p), x + 21, y + 8, PCOL[gr.p]); else number('?', x + 18, y + 8, '#aaa'); y += 12;
           gr.ids.forEach(id => { pos[id] = [x, y]; y += step; });
         });
       });
@@ -708,8 +730,10 @@ function startTarget() {
       const cur = S.icon[id] || pos[id]; cur[0] += (pos[id][0] - cur[0]) * .12; cur[1] += (pos[id][1] - cur[1]) * .12; S.icon[id] = cur;
       const x = Math.round(cur[0]), y = Math.round(cur[1]), cq = S.world.conquests[id], re = (S.world.open || []).includes(id);
       if (re && Math.floor(S.t * 3) % 2) { g.fillStyle = 'rgba(80,140,255,.6)'; g.fillRect(x - 2, y - 2, 30, 22); }
+      const gone = out(id); if (gone) g.globalAlpha = .28;
       head(id, x + 4, y, 16);
       flag(g, cq || id, x + 14, y + 10, 14, 9);
+      if (gone) { g.globalAlpha = 1; g.fillStyle = 'rgba(120,120,120,.7)'; g.fillRect(x + 14, y + 10, 14, 9); }
       if (cq) { g.strokeStyle = '#ffe680'; g.lineWidth = 1; g.strokeRect(x + 13.5, y + 9.5, 15, 10); }
     });
     taskbar();
@@ -815,12 +839,12 @@ function startTarget() {
       g.fillStyle = 'rgba(10,20,60,.85)'; g.fillRect(14, 164, 292, 58);
       g.textAlign = 'left'; g.font = 'bold 8px monospace'; g.fillStyle = '#fff'; g.fillText('STARTED WITH', 22, 177);
       start.forEach((id, i) => flag(g, id, 100 + i * 22, 170, 18, 12));
-      const lost = players().filter(q => q !== p), taken = COUNTRIES.filter(id => owner(id) === p && (S.startOwner || {})[id] !== p);
+      const lost = players().filter(q => q !== p), taken = COUNTRIES.filter(id => (S.world.beatenBy || {})[id] === p);
       g.fillStyle = '#fff'; g.fillText('DEFEATED', 22, 199);
       lost.forEach((q, i) => badge(q, 106 + i * 16, 196));
       taken.forEach((id, i) => flag(g, id, 106 + lost.length * 16 + 4 + i * 18, 191, 15, 10));
       g.font = '8px monospace'; g.fillStyle = '#ffe680'; g.textAlign = 'right';
-      g.fillText(countOf(p) + '/9 countries under the flag of TEAM ' + (p + 1), 298, 216);
+      g.fillText(players().map(q => 'TEAM ' + (q + 1) + ' ' + total(q)).join('   ·   '), 298, 216);
     }
   }
   function badge(p, x, y) { if (p === null || p === undefined) { g.fillStyle = '#888'; g.fillRect(x - 3, y - 3, 6, 6); return; } g.fillStyle = PCOL[p]; g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.fill(); number(p + 1, x, y + 3, '#0a246a'); }
@@ -917,12 +941,13 @@ function startTarget() {
         ['coin', 'The strongest currency today throws first.'],
         ['target', 'Throw 3 flags: the closer to the centre, the more points.'],
         ['boom', 'Never touch the leader: WORLD WAR III, 0 points.'],
-        ['tri', 'Close the triangle: +200. Best score takes the country.'],
-        ['crown', 'After 5 duels, the most countries wins.'],
+        ['tri', 'Close the triangle: +200. All points go to your team.'],
+        ['crown', 'Lose a duel: that country goes grey. Top score wins.'],
+        ['last', 'Under 100 behind after 5 duels? ONE last throw.'],
       ];
       R.forEach(([ic, txt], i) => {
         const t = S.t - .4 - i * .6; if (t < 0) return;
-        const ly = y + 46 + i * 20, ix = x + 16;
+        const ly = y + 44 + i * 18, ix = x + 16;
         if (ic === 'people') PCOL.forEach((c, k) => { g.fillStyle = c; g.fillRect(ix - 7 + k * 4, ly - 7, 3, 3); g.fillRect(ix - 8 + k * 4, ly - 3, 4, 5); });
         if (ic === 'phone') { g.fillStyle = '#222'; g.fillRect(ix - 4, ly - 8, 8, 13); g.fillStyle = '#ff2bd6'; g.fillRect(ix - 3, ly - 7, 6, 11); }
         if (ic === 'card') { g.fillStyle = '#d32626'; g.fillRect(ix - 5, ly - 8, 10, 13); g.fillStyle = '#fff'; g.fillRect(ix - 3, ly - 6, 6, 2); g.fillRect(ix - 3, ly - 2, 6, 1); }
@@ -930,6 +955,7 @@ function startTarget() {
         if (ic === 'target') [7, 5, 3, 1].forEach((r, k) => { g.fillStyle = k % 2 ? '#fff' : '#d32626'; g.beginPath(); g.arc(ix, ly - 2, r, 0, Math.PI * 2); g.fill(); });
         if (ic === 'boom') { g.fillStyle = '#ffd34a'; g.beginPath(); for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2, r = k % 2 ? 3 : 8; g.lineTo(ix + Math.cos(a) * r, ly - 2 + Math.sin(a) * r); } g.fill(); }
         if (ic === 'tri') { g.strokeStyle = '#2f9e3a'; g.lineWidth = 2; g.beginPath(); g.moveTo(ix - 6, ly + 3); g.lineTo(ix, ly - 7); g.lineTo(ix + 6, ly + 3); g.closePath(); g.stroke(); }
+        if (ic === 'last') { g.fillStyle = '#888'; g.fillRect(ix - 6, ly - 7, 12, 9); g.fillStyle = '#fff'; g.font = 'bold 8px monospace'; g.textAlign = 'center'; g.fillText('?', ix, ly); g.textAlign = 'left'; }
         if (ic === 'crown') { g.fillStyle = '#e8b020'; g.beginPath(); g.moveTo(ix - 7, ly + 3); g.lineTo(ix - 7, ly - 6); g.lineTo(ix - 3, ly - 1); g.lineTo(ix, ly - 8); g.lineTo(ix + 3, ly - 1); g.lineTo(ix + 7, ly - 6); g.lineTo(ix + 7, ly + 3); g.fill(); }
         const shown = txt.slice(0, Math.floor(t * 45));   // typed out
         g.fillStyle = '#111'; g.font = '7px monospace'; g.textAlign = 'left'; wrap(shown, x + 30, ly + 1, w - 36, 8);
@@ -964,12 +990,24 @@ function startTarget() {
       if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#fff'; g.fillRect(WIN.x + 10, 196, 10, 14); g.fillStyle = '#1f4fb8'; g.fillRect(WIN.x + 14, 196, 2, 5); }
       return;
     }
+    if (sc === 'lastchance') {
+      const L = S.lastChance; desktop(L.id); windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, L.id);
+      g.fillStyle = 'rgba(40,0,10,.88)'; g.fillRect(WIN.x + 2, WIN.y + 12, WIN.w - 4, WIN.h - 14);
+      const fl = Math.floor(S.t * 4) % 2;
+      g.textAlign = 'center'; g.font = '900 26px Impact, "Arial Black", sans-serif'; g.lineWidth = 4; g.strokeStyle = '#000';
+      g.strokeText('LAST CHANCE', 160, 50); g.fillStyle = fl ? '#ffe040' : '#ff4040'; g.fillText('LAST CHANCE', 160, 50);
+      flag(g, L.id, 136, 64, 48, 32); badge(L.team, 160, 112);
+      g.font = '8px monospace'; g.fillStyle = '#fff';
+      wrap(`TEAM ${L.team + 1} is ${L.need - 1} points behind and plays the spare country, ${NAME[L.id]}, against ${NAME[S.rival]}.`, 160, 136, 210, 10);
+      g.fillStyle = '#ffe680'; wrap(`ONE flag only. It must score ${L.need} or more: land it close to the centre without touching the leader.`, 160, 170, 210, 10);
+      return;
+    }
     if (sc === 'switch' || sc === 'result') {
       desktop(S.rival); windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, S.rival);
       g.fillStyle = 'rgba(10,20,60,.82)'; g.fillRect(WIN.x + 2, WIN.y + 12, WIN.w - 4, WIN.h - 14);
-      const D = S.duelists, two = owner(D[1]) !== null;
+      const D = S.duelists, two = !S.lastChance;
       [0, 1].forEach(i => {
-        const x = i ? 205 : 115, win = sc === 'result' && (two ? S.scores[i] > S.scores[1 - i] : (i === 0) === S.closed[0]);
+        const x = i ? 205 : 115, win = sc === 'result' && (two ? S.scores[i] > S.scores[1 - i] : i === 0 && S.scores[0] >= S.lastChance.need);
         const s = win ? 1 + Math.sin(S.t * 6) * .08 + .2 : 1, w = 48 * s, h = 32 * s;
         flag(g, flagOf(D[i]), x - w / 2, 70 - h / 2, w, h); badge(owner(D[i]), x, 40);
         if (!two && i === 1) return;
@@ -981,12 +1019,12 @@ function startTarget() {
         g.fillStyle = '#222'; g.fillRect(px - 9, py - 15, 18, 30); g.fillStyle = '#ff2bd6'; g.fillRect(px - 7, py - 13, 14, 26); flag(g, flagOf(D[1]), px - 5, py - 4, 10, 7);
       }
       if (sc === 'result' && S.t > .8) {   // who won the battle, in words
-        const [a, b] = D, tie = two && S.scores[0] === S.scores[1];
-        const win = two ? (S.scores[0] > S.scores[1] ? a : b) : (S.closed[0] ? a : null), lose = win === a ? b : a;
-        const big = tie ? 'DRAW' : win ? NAME[win].toUpperCase() + ' WINS' : NAME[b].toUpperCase() + ' RESISTS';
-        const small = tie ? 'Same score. The battle starts again.' : win ? NAME[lose] + ' now flies the flag of ' + NAME[win] + '.' : 'The triangle was not closed. Nothing changes.';
+        const [a, b] = D, L = S.lastChance, tie = !L && S.scores[0] === S.scores[1];
+        const win = L ? (S.scores[0] >= L.need ? a : null) : S.scores[0] > S.scores[1] ? a : b, lose = win === a ? b : a;
+        const big = L ? (win ? 'TEAM ' + (L.team + 1) + ' TURNS IT AROUND!' : 'NOT ENOUGH') : tie ? 'DRAW' : NAME[win].toUpperCase() + ' WINS';
+        const small = L ? (win ? 'One flag, right where it had to be.' : 'TEAM ' + (L.leader + 1) + ' keeps the lead.') : tie ? 'Same score. The battle starts again.' : NAME[lose] + ' goes grey: out of the game.';
         const k = Math.min(1, (S.t - .8) * 4);
-        g.fillStyle = tie ? '#888' : win ? '#d32626' : '#245edb'; g.fillRect(WIN.x + 6, 150, (WIN.w - 12) * k, 46);
+        g.fillStyle = tie ? '#888' : win ? '#d32626' : '#245edb'; g.font = '900 20px Impact, "Arial Black", sans-serif'; g.fillRect(WIN.x + 6, 150, (WIN.w - 12) * k, 46);
         if (k >= 1) {
           g.textAlign = 'center'; g.font = '900 20px Impact, "Arial Black", sans-serif'; g.lineWidth = 3; g.strokeStyle = '#0a246a';
           g.strokeText(big, 160, 172); g.fillStyle = '#ffe040'; g.fillText(big, 160, 172);
@@ -1125,7 +1163,7 @@ function startTarget() {
     if (S.sensShow > 0) { S.sensShow -= .02; number(CONFIG.flickSpeed.toFixed(2), W - 30, 52, '#fff'); }
     // flags left (bottom left) and points (bottom right)
     pill(6, H - 20, 50, 14);
-    for (let i = 0; i < CONFIG.flags; i++) { if (i < S.left) flag(g, flagOf(S.me), 9 + i * 15, H - 17, 12, 8); else { g.fillStyle = 'rgba(255,255,255,.2)'; g.fillRect(9 + i * 15, H - 17, 12, 8); } }
+    for (let i = 0; i < (S.lastChance ? 1 : CONFIG.flags); i++) { if (i < S.left) flag(g, flagOf(S.me), 9 + i * 15, H - 17, 12, 8); else { g.fillStyle = 'rgba(255,255,255,.2)'; g.fillRect(9 + i * 15, H - 17, 12, 8); } }
     pill(W - 40, H - 20, 34, 14); number(S.influence, W - 23, H - 10);
     // ring sectors
     sectors().forEach((ok, i) => {
