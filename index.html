@@ -513,7 +513,8 @@ function startTarget() {
     const sc = S.scene;
     if (sc === 'off') { Modem.unlock(); go('splash'); }
     else if (sc === 'splash' || sc === 'dial') { Modem.stop(); Music.start(); go('title'); } // skip the intro
-    else if (sc === 'title') { Music.start(); S.sel = 0; go('players'); }
+    else if (sc === 'title') { Music.start(); S.sel = 0; go('rules'); }
+    else if (sc === 'rules' && S.t > 1.5) go('players');
     else if (sc === 'players') {                       // how many players: 2, 3 or 4
       S.n = S.sel + 2; S.world = { conquests: {}, owner: {}, cards: [] }; S.picker = 0; S.duels = 0; S.sel = 0; S.me = null; go('draft');
     }
@@ -609,7 +610,7 @@ function startTarget() {
     const sc = S.scene, prog = S.loaded / 10;
     if (sc === 'splash' && ((S.t > 2.2 && prog >= 1) || S.t > 6)) { Modem.play(); go('dial'); }
     else if (sc === 'dial' && ((S.t > 3 && S.dataDone >= 10) || S.t > 7)) { Modem.stop(); Music.start(); go('title'); }
-    const AUTO = { coins: 4.5, crash: 5, switch: 3.5, result: 3.5, win: 7 };   // the card stays long enough to read it          // nobody has to touch the laptop
+    const AUTO = { rules: 25, ending: 10, coins: 4.5, crash: 5, switch: 3.5, result: 3.5, win: 7 };   // the card stays long enough to read it          // nobody has to touch the laptop
     if (AUTO[S.scene] && S.t > AUTO[S.scene]) press();
     if (S.scene === 'draft' && Cam.found) {                                         // choose by pointing the phone
       const list = COUNTRIES.filter(id => owner(id) === null); if (list.length) S.sel = COUNTRIES.indexOf(list[Math.min(list.length - 1, Math.floor(Cam.x * list.length))]);
@@ -748,6 +749,26 @@ function startTarget() {
     g.restore();
   }
 
+  function winScreen() {
+    const t = S.t;
+    for (let i = 0; i < 70; i++) {   // confetti
+      const x = (i * 47 + Math.sin(t * 2 + i) * 12) % W, y = ((i * 23) % 240 + t * (40 + i % 5 * 12)) % 260 - 20;
+      g.fillStyle = ['#ff2bd6', '#3ad8ff', '#ffe040', '#7dff9a', '#fff', '#d32626'][i % 6]; g.fillRect(Math.round(x), Math.round(y), 3, 2 + i % 3);
+    }
+    const k = Math.min(1, t * 2), bw = 96 * k, bh = 64 * k, wave = Math.sin(t * 4) * 3;
+    g.fillStyle = 'rgba(10,20,60,.78)'; g.fillRect(40, 22, 240, 182);
+    g.fillStyle = '#fff'; g.fillRect(160 - bw / 2 - 3, 38 - 3 + wave, bw + 6, bh + 6);
+    flag(g, S.me, 160 - bw / 2, 38 + wave, bw, bh);
+    if (t > .6) {
+      g.textAlign = 'center'; g.font = '900 28px Impact, "Arial Black", sans-serif';
+      g.lineWidth = 4; g.strokeStyle = '#0a246a'; g.strokeText(NAME[S.me].toUpperCase(), 160, 136); g.fillStyle = '#fff'; g.fillText(NAME[S.me].toUpperCase(), 160, 136);
+    }
+    if (t > 1) {
+      const p = 1 + Math.sin(t * 6) * .08; g.save(); g.translate(160, 166); g.scale(p, p); g.rotate(-.05);
+      g.font = '900 30px Impact, "Arial Black", sans-serif'; g.lineWidth = 5; g.strokeStyle = '#d32626'; g.strokeText('WINS!', 0, 0); g.fillStyle = '#ffe040'; g.fillText('WINS!', 0, 0); g.restore();
+    }
+    if (t > 1.6) { badge(S.champ, 132, 188); number(countOf(S.champ) + '/9', 168, 191, '#ffe680'); }
+  }
   function badge(p, x, y) { if (p === null || p === undefined) { g.fillStyle = '#888'; g.fillRect(x - 3, y - 3, 6, 6); return; } g.fillStyle = PCOL[p]; g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.fill(); number(p + 1, x, y + 3, '#0a246a'); }
   function groupShot(rivalPick, empty) {
     // PS1-cover group photo: cyan-to-violet gradient, low-poly sofa
@@ -826,6 +847,39 @@ function startTarget() {
       const p = sc === 'splash' ? Math.min(1, S.loaded / 10) : Math.min(1, S.dataDone / 10);
       g.strokeStyle = '#a9c8ff'; g.lineWidth = 1; g.strokeRect(80.5, 216.5, 160, 10);
       for (let i = 0; i < Math.round(p * 19); i++) { g.fillStyle = '#2f9e3a'; g.fillRect(83 + i * 8, 219, 6, 5); }
+      return;
+    }
+    if (sc === 'rules') {
+      desktop(null);
+      const x = 10, y = 12, w = 300, h = 204; windowFrame(x, y, w, h, null);
+      g.fillStyle = '#fff'; g.font = 'bold 8px monospace'; g.textAlign = 'left'; g.fillText('HOW_TO_PLAY.txt', x + 6, y + 9);
+      g.fillStyle = '#fdfdf6'; g.fillRect(x + 2, y + 12, w - 4, h - 14);
+      g.fillStyle = '#0a246a'; g.font = '900 13px Impact, "Arial Black", sans-serif'; g.fillText('HOW TO PLAY', x + 10, y + 29);
+      const R = [
+        ['people', '2-4 players share out the 9 countries.'],
+        ['phone', 'Scan the QR: your phone becomes your flag.'],
+        ['card', 'A news card decides who fights whom.'],
+        ['coin', 'The strongest currency today throws first.'],
+        ['target', 'Throw 3 flags: the closer to the centre, the more points.'],
+        ['boom', 'Never touch the leader: WORLD WAR III, 0 points.'],
+        ['tri', 'Close the triangle: +200. Best score takes the country.'],
+        ['crown', 'After 5 duels, the most countries wins.'],
+      ];
+      R.forEach(([ic, txt], i) => {
+        const t = S.t - .4 - i * .6; if (t < 0) return;
+        const ly = y + 46 + i * 20, ix = x + 16;
+        if (ic === 'people') PCOL.forEach((c, k) => { g.fillStyle = c; g.fillRect(ix - 7 + k * 4, ly - 7, 3, 3); g.fillRect(ix - 8 + k * 4, ly - 3, 4, 5); });
+        if (ic === 'phone') { g.fillStyle = '#222'; g.fillRect(ix - 4, ly - 8, 8, 13); g.fillStyle = '#ff2bd6'; g.fillRect(ix - 3, ly - 7, 6, 11); }
+        if (ic === 'card') { g.fillStyle = '#d32626'; g.fillRect(ix - 5, ly - 8, 10, 13); g.fillStyle = '#fff'; g.fillRect(ix - 3, ly - 6, 6, 2); g.fillRect(ix - 3, ly - 2, 6, 1); }
+        if (ic === 'coin') coin(ix, ly - 2, 'usa', 6);
+        if (ic === 'target') [7, 5, 3, 1].forEach((r, k) => { g.fillStyle = k % 2 ? '#fff' : '#d32626'; g.beginPath(); g.arc(ix, ly - 2, r, 0, Math.PI * 2); g.fill(); });
+        if (ic === 'boom') { g.fillStyle = '#ffd34a'; g.beginPath(); for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2, r = k % 2 ? 3 : 8; g.lineTo(ix + Math.cos(a) * r, ly - 2 + Math.sin(a) * r); } g.fill(); }
+        if (ic === 'tri') { g.strokeStyle = '#2f9e3a'; g.lineWidth = 2; g.beginPath(); g.moveTo(ix - 6, ly + 3); g.lineTo(ix, ly - 7); g.lineTo(ix + 6, ly + 3); g.closePath(); g.stroke(); }
+        if (ic === 'crown') { g.fillStyle = '#e8b020'; g.beginPath(); g.moveTo(ix - 7, ly + 3); g.lineTo(ix - 7, ly - 6); g.lineTo(ix - 3, ly - 1); g.lineTo(ix, ly - 8); g.lineTo(ix + 3, ly - 1); g.lineTo(ix + 7, ly - 6); g.lineTo(ix + 7, ly + 3); g.fill(); }
+        const shown = txt.slice(0, Math.floor(t * 45));   // typed out
+        g.fillStyle = '#111'; g.font = '7px monospace'; g.textAlign = 'left'; wrap(shown, x + 30, ly + 1, w - 36, 8);
+      });
+      if (S.t > 6 && Math.floor(S.t * 2) % 2) { g.fillStyle = '#0a246a'; g.fillRect(x + w - 22, y + h - 16, 8, 8); }   // ready: throw to start
       return;
     }
     if (sc === 'title') {
@@ -952,7 +1006,7 @@ function startTarget() {
       }
       return;
     }
-    if (sc === 'ending') { live(null); for (let y = 0; y < 226; y += 20) for (let x = 0; x < W; x += 30) flag(g, S.me, x + ((y / 20) % 2) * 15 - 15, y, 28, 18); g.save(); g.translate(160, 110); g.scale(3, 3); badge(S.champ, 0, 0); g.restore(); taskbar(); }
+    if (sc === 'ending') { live(null); for (let y = 0; y < 226; y += 20) for (let x = 0; x < W; x += 30) flag(g, S.me, x + ((y / 20) % 2) * 15 - 15, y, 28, 18); taskbar(); winScreen(); }
   }
 
   // wireframe globe, rotating, with a flag on each capital (real latitude and longitude)
