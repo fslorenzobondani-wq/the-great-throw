@@ -83,6 +83,24 @@ Vibe Coding final project (Elisava MAIAD 26/27). One entry per version: what I w
 
 **Messages used:** to fill in.
 
+## v8 · 2026-11-24
+**Wanted:** after playing a whole match: say who won each battle, show whose turn it is on the phone, a clearer team layout, readable text, a real final screen, and a scoring system where every throw counts until the end.
+
+**Decisions (and why):**
+- **Battle result in words:** a banner under the scores (e.g. GERMANY WINS, "Russia goes grey: out of the game"). Before, the points appeared but nobody said who had won.
+- **Teams on the sides:** player 1's countries in a column on the left, player 2 on the right, 3 and 4 below; each team header shows its live total. The sidebars work as a scoreboard.
+- **Sharper text:** text is drawn on its own layer at 4× resolution, still under the CRT scanlines. The pixel look stays on the graphics, the words become readable.
+- **Phone shows the player number (1-4) in the team colour** instead of the flag, so the person holding it knows it is their turn. The link was made self-healing (re-sent every second, auto-reconnect, QR opens the newest page) because on iPhone the number stayed on 1.
+- **QR kept square and above the scanlines** so every phone reads it.
+- **Score decides the match:** every point goes to the team; the beaten country goes grey instead of changing flag; after 5 duels the top score wins. Winning duels matters, but a close loser is not wiped out.
+- **The spare country becomes the LAST CHANCE:** one single throw for the team that is behind, only if it is less than 100 points behind (one flag scores at most 100) and only if that flag covers the gap. Lorenzo's condition: it must not be a gift where far throws win just because of an extra turn.
+- **Final screen:** TEAM n WINS! in the team colour, the globe turning into that colour, the team's starting flags orbiting it, STARTED WITH / DEFEATED and every team's total.
+- **Coins kept for who throws first:** an energy-price idea for the euro countries was dropped after testing: the service blocks other websites, limits requests and the Italian data licence is private use only.
+
+**Known limits:** the phone number change depends on the phone link (PeerJS), testable only on real phones; world map still to do.
+
+**Messages used:** to fill in.
+
 ## Dependency map
 | Service | What for | Owned by |
 | --- | --- | --- |
