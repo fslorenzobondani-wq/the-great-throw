@@ -302,9 +302,9 @@ function startTarget() {
       conn.on('close', () => { S.phone = false; S.conn = null; updateQR(); });
     });
   } catch (e) { console.warn('PeerJS unavailable: single-player mode'); }
-  function sendFlag() { try { if (S.conn && S.phone && S.me) S.conn.send({ type: 'flag', id: S.world.conquests[S.me] || S.me }); } catch (e) {} }
+  function sendFlag() { try { if (S.conn && S.phone && S.me) S.conn.send({ type: 'flag', id: S.world.conquests[S.me] || S.me, player: owner(S.me) }); } catch (e) {} }
   function makeQR() {
-    const b = document.getElementById('qr'), url = location.origin + location.pathname + '?role=phone&flag=' + (S.me || COUNTRIES.find(id => owner(id) === 0) || 'italy') + '&id=' + code;
+    const b = document.getElementById('qr'), url = location.origin + location.pathname + '?role=phone&flag=' + (S.me || COUNTRIES.find(id => owner(id) === 0) || 'italy') + '&p=' + ((S.me && owner(S.me) !== null ? owner(S.me) : 0) + 1) + '&id=' + code;
     if (b.dataset.url === url || typeof qrcode === 'undefined') return;
     const qr = qrcode(0, 'M'); qr.addData(url); qr.make(); b.innerHTML = qr.createImgTag(4, 0); b.dataset.url = url; console.log('Phone:', url);
   }
@@ -1124,12 +1124,12 @@ function startPhone() {
   document.getElementById('stage').style.display = 'none';
   const pad = document.getElementById('pad'); pad.style.display = 'block';
   const cv = document.getElementById('padc'), g = cv.getContext('2d');
-  let conn = null, connected = false, start = null, country = 0, trail = 0;
+  let conn = null, connected = false, start = null, country = 0, trail = 0, player = Math.max(1, Math.min(4, Number(new URLSearchParams(location.search).get('p')) || 1)), pop = 0;
   const id = new URLSearchParams(location.search).get('id'), fromLink = new URLSearchParams(location.search).get('flag');
   if (COUNTRIES.includes(fromLink)) country = COUNTRIES.indexOf(fromLink);
   function size() { cv.width = Math.round(innerWidth * (devicePixelRatio || 1)); cv.height = Math.round(innerHeight * (devicePixelRatio || 1)); g.imageSmoothingEnabled = false; }
   size(); addEventListener('resize', size);
-  try { const peer = new Peer(); peer.on('open', () => { conn = peer.connect('greatthrow-' + id); conn.on('open', () => connected = true); conn.on('close', () => connected = false); conn.on('data', d => { if (d.type === 'flag' && COUNTRIES.includes(d.id)) country = COUNTRIES.indexOf(d.id); }); }); } catch (e) {}
+  try { const peer = new Peer(); peer.on('open', () => { conn = peer.connect('greatthrow-' + id); conn.on('open', () => connected = true); conn.on('close', () => connected = false); conn.on('data', d => { if (d.type === 'flag') { if (COUNTRIES.includes(d.id)) country = COUNTRIES.indexOf(d.id); if (d.player !== null && d.player !== undefined && d.player + 1 !== player) { player = d.player + 1; pop = 1; } } }); }); } catch (e) {}
   const send = d => { if (conn && connected) conn.send(d); };
   // touchpad: finger down/move = aim (shown on the laptop), finger up = throw
   let last = 0, pos = null;
@@ -1145,10 +1145,13 @@ function startPhone() {
     const W = cv.width, H = cv.height;
     // pink screen (what the webcam tracks) with the flag in its real proportions, centred
     g.fillStyle = trail > 0 ? '#ffffff' : '#ff2bd6'; g.fillRect(0, 0, W, H);
-    const RATIO = { germany: 5 / 3, usa: 1.9, northkorea: 2 }, ratio = RATIO[COUNTRIES[country]] || 1.5;
-    const fw = Math.round(W * .8), fh = Math.round(fw / ratio), fx = Math.round((W - fw) / 2), fy = Math.round((H - fh) / 2);
-    g.fillStyle = '#000'; g.fillRect(fx - 3, fy - 3, fw + 6, fh + 6);
-    flag(g, COUNTRIES[country], fx, fy, fw, fh);
+    // whose turn it is: the player's number in their colour (1 pink, 2 cyan, 3 yellow, 4 green); pops when it changes
+    const COL = ['#ff2bd6', '#3ad8ff', '#ffe040', '#7dff9a'], r = Math.round(Math.min(W, H) * .3 * (1 + pop * .25));
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(W / 2, H / 2, r, 0, Math.PI * 2); g.fill();
+    g.fillStyle = COL[player - 1]; g.beginPath(); g.arc(W / 2, H / 2, r * .86, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `900 ${Math.round(r * 1.25)}px Impact, "Arial Black", sans-serif`;
+    g.lineWidth = Math.round(r * .08); g.strokeStyle = '#0a246a'; g.strokeText(String(player), W / 2, H / 2 + r * .05); g.fillText(String(player), W / 2, H / 2 + r * .05);
+    pop = Math.max(0, pop - .04);
     const dot = Math.round(W * .03); g.fillStyle = connected ? '#3c3' : '#c33'; g.fillRect(W - dot * 2, dot, dot, dot);
     trail = Math.max(0, trail - .08);
     requestAnimationFrame(draw);
