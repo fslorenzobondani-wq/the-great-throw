@@ -535,7 +535,7 @@ function startTarget() {
       const id = COUNTRIES[S.sel]; if (owner(id) !== null) return;
       S.world.owner[id] = S.picker; S.picker = (S.picker + 1) % S.n;
       const taken = Object.keys(S.world.owner).length;
-      if (taken >= Math.floor(9 / S.n) * S.n) { S.scenario = scenarioAfter(null); S.last = null; Cam.on === true ? go('win') : go('pair'); }
+      if (taken >= Math.floor(9 / S.n) * S.n) { S.startOwner = { ...S.world.owner }; S.scenario = scenarioAfter(null); S.last = null; Cam.on === true ? go('win') : go('pair'); }
       else { S.sel = 0; if (owner(COUNTRIES[0]) !== null) move(1); }
     }
     else if (sc === 'win' && S.t > 4) nextDuel();
@@ -623,7 +623,7 @@ function startTarget() {
     const sc = S.scene, prog = S.loaded / 10;
     if (sc === 'splash' && ((S.t > 2.2 && prog >= 1) || S.t > 6)) { Modem.play(); go('dial'); }
     else if (sc === 'dial' && ((S.t > 3 && S.dataDone >= 10) || S.t > 7)) { Modem.stop(); Music.start(); go('title'); }
-    const AUTO = { rules: 25, ending: 10, coins: 4.5, crash: 5, switch: 3.5, result: 3.5, win: 7 };   // the card stays long enough to read it          // nobody has to touch the laptop
+    const AUTO = { rules: 25, ending: 15, coins: 4.5, crash: 5, switch: 3.5, result: 3.5, win: 7 };   // the card stays long enough to read it          // nobody has to touch the laptop
     if (AUTO[S.scene] && S.t > AUTO[S.scene]) press();
     if (S.scene === 'draft' && Cam.found) {                                         // choose by pointing the phone
       const list = COUNTRIES.filter(id => owner(id) === null); if (list.length) S.sel = COUNTRIES.indexOf(list[Math.min(list.length - 1, Math.floor(Cam.x * list.length))]);
@@ -783,25 +783,43 @@ function startTarget() {
     g.restore();
   }
 
+  // final screen: the winning team, a globe turning into its colour, its starting flags orbiting around, who it defeated
   function winScreen() {
-    const t = S.t;
-    for (let i = 0; i < 70; i++) {   // confetti
-      const x = (i * 47 + Math.sin(t * 2 + i) * 12) % W, y = ((i * 23) % 240 + t * (40 + i % 5 * 12)) % 260 - 20;
-      g.fillStyle = ['#ff2bd6', '#3ad8ff', '#ffe040', '#7dff9a', '#fff', '#d32626'][i % 6]; g.fillRect(Math.round(x), Math.round(y), 3, 2 + i % 3);
+    const t = S.t, p = S.champ, col = PCOL[p], start = COUNTRIES.filter(id => (S.startOwner || {})[id] === p);
+    g.fillStyle = '#060b24'; g.fillRect(0, 0, W, 226);
+    for (let i = 0; i < 60; i++) {   // confetti in the team colour and white
+      const x = (i * 47 + Math.sin(t * 2 + i) * 12) % W, y = ((i * 23) % 240 + t * (35 + i % 5 * 10)) % 250 - 20;
+      g.fillStyle = i % 3 ? col : '#fff'; g.fillRect(Math.round(x), Math.round(y), 3, 2 + i % 3);
     }
-    const k = Math.min(1, t * 2), bw = 96 * k, bh = 64 * k, wave = Math.sin(t * 4) * 3;
-    g.fillStyle = 'rgba(10,20,60,.78)'; g.fillRect(40, 22, 240, 182);
-    g.fillStyle = '#fff'; g.fillRect(160 - bw / 2 - 3, 38 - 3 + wave, bw + 6, bh + 6);
-    flag(g, S.me, 160 - bw / 2, 38 + wave, bw, bh);
-    if (t > .6) {
-      g.textAlign = 'center'; g.font = '900 28px Impact, "Arial Black", sans-serif';
-      g.lineWidth = 4; g.strokeStyle = '#0a246a'; g.strokeText(NAME[S.me].toUpperCase(), 160, 136); g.fillStyle = '#fff'; g.fillText(NAME[S.me].toUpperCase(), 160, 136);
+    // ring of the team's starting flags, alternating, orbiting the globe
+    const ring = start.length ? start : [S.me], slots = Math.max(10, ring.length * 3), cx = 160, cy = 98, R = 46;
+    for (let i = 0; i < slots; i++) {
+      const a = i / slots * Math.PI * 2 + t * .5, x = cx + Math.cos(a) * 70, y = cy + Math.sin(a) * 52;
+      if (Math.sin(a) < 0) flag(g, ring[i % ring.length], x - 8, y - 5, 16, 11);
     }
-    if (t > 1) {
-      const p = 1 + Math.sin(t * 6) * .08; g.save(); g.translate(160, 166); g.scale(p, p); g.rotate(-.05);
-      g.font = '900 30px Impact, "Arial Black", sans-serif'; g.lineWidth = 5; g.strokeStyle = '#d32626'; g.strokeText('WINS!', 0, 0); g.fillStyle = '#ffe040'; g.fillText('WINS!', 0, 0); g.restore();
+    globe(cx, cy, R, col, Math.min(1, t / 2.5));
+    for (let i = 0; i < slots; i++) {
+      const a = i / slots * Math.PI * 2 + t * .5, x = cx + Math.cos(a) * 70, y = cy + Math.sin(a) * 52;
+      if (Math.sin(a) >= 0) { g.fillStyle = '#fff'; g.fillRect(x - 9, y - 6, 18, 13); flag(g, ring[i % ring.length], x - 8, y - 5, 16, 11); }
     }
-    if (t > 1.6) { badge(S.champ, 132, 188); number(countOf(S.champ) + '/9', 168, 191, '#ffe680'); }
+    // TEAM n WINS!
+    if (t > .5) {
+      const pz = 1 + Math.sin(t * 6) * .06; g.save(); g.translate(160, 26); g.scale(pz, pz);
+      g.textAlign = 'center'; g.font = '900 24px Impact, "Arial Black", sans-serif'; g.lineWidth = 4; g.strokeStyle = '#0a246a';
+      g.strokeText('TEAM ' + (p + 1) + ' WINS!', 0, 0); g.fillStyle = col; g.fillText('TEAM ' + (p + 1) + ' WINS!', 0, 0); g.restore();
+    }
+    // started with … / defeated …
+    if (t > 1.5) {
+      g.fillStyle = 'rgba(10,20,60,.85)'; g.fillRect(14, 164, 292, 58);
+      g.textAlign = 'left'; g.font = 'bold 8px monospace'; g.fillStyle = '#fff'; g.fillText('STARTED WITH', 22, 177);
+      start.forEach((id, i) => flag(g, id, 100 + i * 22, 170, 18, 12));
+      const lost = players().filter(q => q !== p), taken = COUNTRIES.filter(id => owner(id) === p && (S.startOwner || {})[id] !== p);
+      g.fillStyle = '#fff'; g.fillText('DEFEATED', 22, 199);
+      lost.forEach((q, i) => badge(q, 106 + i * 16, 196));
+      taken.forEach((id, i) => flag(g, id, 106 + lost.length * 16 + 4 + i * 18, 191, 15, 10));
+      g.font = '8px monospace'; g.fillStyle = '#ffe680'; g.textAlign = 'right';
+      g.fillText(countOf(p) + '/9 countries under the flag of TEAM ' + (p + 1), 298, 216);
+    }
   }
   function badge(p, x, y) { if (p === null || p === undefined) { g.fillStyle = '#888'; g.fillRect(x - 3, y - 3, 6, 6); return; } g.fillStyle = PCOL[p]; g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.fill(); number(p + 1, x, y + 3, '#0a246a'); }
   function groupShot(rivalPick, empty) {
@@ -1054,12 +1072,12 @@ function startTarget() {
       }
       return;
     }
-    if (sc === 'ending') { live(null); for (let y = 0; y < 226; y += 20) for (let x = 0; x < W; x += 30) flag(g, S.me, x + ((y / 20) % 2) * 15 - 15, y, 28, 18); taskbar(); winScreen(); }
+    if (sc === 'ending') { live(null); winScreen(); taskbar(); }
   }
 
   // wireframe globe, rotating, with a flag on each capital (real latitude and longitude)
-  function globe() {
-    const R = 86, cx = 160, cy = 120, rot = S.t * .35, tilt = .35;
+  function globe(cx = 160, cy = 120, R = 86, tint = null, k = 0) {
+    const rot = S.t * .35, tilt = .35;
     const proj = (lat, lon) => {
       const la = lat * Math.PI / 180, lo = lon * Math.PI / 180 + rot;
       let x = Math.cos(la) * Math.sin(lo), y = Math.sin(la), z = Math.cos(la) * Math.cos(lo);
@@ -1067,12 +1085,14 @@ function startTarget() {
       return { x: cx + x * R, y: cy - y2 * R, front: z2 > 0 };
     };
     const grad = g.createRadialGradient(cx - 30, cy - 30, 10, cx, cy, R);
-    grad.addColorStop(0, '#7fd0ff'); grad.addColorStop(.6, '#1f5fd0'); grad.addColorStop(1, '#0a246a');
+    const mix = (a, b) => { const h = c => [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16)); const A = h(a), B = h(b); return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * k)).join(',')})`; };
+    const c0 = '#7fd0ff', c1 = '#1f5fd0', c2 = '#0a246a';
+    grad.addColorStop(0, tint ? mix(c0, '#ffffff') : c0); grad.addColorStop(.6, tint ? mix(c1, tint) : c1); grad.addColorStop(1, tint ? mix(c2, tint) : c2);
     g.fillStyle = grad; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
     g.strokeStyle = 'rgba(160,230,255,.55)'; g.lineWidth = 1;
     for (let lon = 0; lon < 360; lon += 20) { g.beginPath(); let on = false; for (let lat = -90; lat <= 90; lat += 6) { const p = proj(lat, lon); if (p.front) { on ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y); on = true; } else on = false; } g.stroke(); }
     for (let lat = -60; lat <= 60; lat += 20) { g.beginPath(); let on = false; for (let lon = 0; lon <= 360; lon += 6) { const p = proj(lat, lon); if (p.front) { on ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y); on = true; } else on = false; } g.stroke(); }
-    COUNTRIES.forEach(id => { const n = NATIONS[id], p = proj(n.lat, n.lon); if (p.front) pole(p.x, p.y, S.world.conquests[id] || id, 1.1, S.t); });
+    COUNTRIES.forEach(id => { const n = NATIONS[id], p = proj(n.lat, n.lon); if (p.front) pole(p.x, p.y, S.world.conquests[id] || id, R / 78, S.t); });
     g.strokeStyle = '#0a246a'; g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.stroke();
   }
 
