@@ -11,6 +11,7 @@
           filter: saturate(1.5) contrast(1.2) brightness(.92); }
   #yt { position: absolute; top: 50%; left: 50%; width: 214%; height: 120%; transform: translate(-50%, -50%); border: 0; pointer-events: none; visibility: hidden;
         filter: saturate(1.5) contrast(1.2) brightness(.92); }   /* 16:9 YouTube video covering the 4:3 screen */
+  #txt { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }   /* sharp text layer, still under the scanlines */
   #screen { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; }
   #fx { position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
         background:
@@ -30,6 +31,7 @@
   <video id="live" muted loop playsinline autoplay preload="auto"></video>
   <iframe id="yt" allow="autoplay; encrypted-media" tabindex="-1" title=""></iframe>
   <canvas id="screen" width="320" height="240"></canvas>
+  <canvas id="txt" width="1280" height="960"></canvas>
   <div id="qr"></div>
   <audio id="music" src="audio/soundtrack.mp3" loop preload="auto"></audio>
   <div id="fx"></div>
@@ -179,6 +181,17 @@ function flag(g, id, x, y, w, h) {
    ============================================================ */
 function startTarget() {
   const cv = document.getElementById('screen'), g = cv.getContext('2d');
+  // text is drawn 4x sharper on its own layer: same position, colour and font as on the pixel screen
+  const tc = document.getElementById('txt').getContext('2d');
+  ['fillText', 'strokeText'].forEach(fn => {
+    g[fn] = function (text, x, y, maxW) {
+      const m = g.getTransform();
+      tc.setTransform(m.a * 4, m.b * 4, m.c * 4, m.d * 4, m.e * 4, m.f * 4);
+      tc.font = g.font; tc.textAlign = g.textAlign; tc.textBaseline = g.textBaseline; tc.globalAlpha = g.globalAlpha;
+      tc.fillStyle = g.fillStyle; tc.strokeStyle = g.strokeStyle; tc.lineWidth = g.lineWidth; tc.lineJoin = 'round';
+      maxW === undefined ? tc[fn](text, x, y) : tc[fn](text, x, y, maxW);
+    };
+  });
   g.imageSmoothingEnabled = false;
   const W = 320, H = 240, CX = 160, CY = 116;
   const WIN = { x: 44, y: 8, w: 232, h: 212 };
@@ -844,6 +857,7 @@ function startTarget() {
   }
 
   function draw() {
+    tc.setTransform(1, 0, 0, 1, 0, 0); tc.clearRect(0, 0, 1280, 960);
     const sc = S.scene;
     if (sc === 'off') {
       g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
