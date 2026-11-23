@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>The Great Throw</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; touch-action: none; }
+  #stage { position: absolute; inset: 0; margin: auto; aspect-ratio: 4 / 3; max-width: 100vw; max-height: 100vh; overflow: hidden; background: #000; border-radius: 2.5% / 3.3%; }
+  #live { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; visibility: hidden;
+          filter: saturate(1.5) contrast(1.2) brightness(.92); }
+  #yt { position: absolute; top: 50%; left: 50%; width: 214%; height: 120%; transform: translate(-50%, -50%); border: 0; pointer-events: none; visibility: hidden;
+        filter: saturate(1.5) contrast(1.2) brightness(.92); }   /* 16:9 YouTube video covering the 4:3 screen */
+  #screen { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; }
+  #fx { position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+        background:
+          repeating-linear-gradient(0deg, rgba(0,0,0,.25) 0 1px, transparent 1px 3px),
+          radial-gradient(ellipse at center, transparent 58%, rgba(0,0,0,.7) 100%);
+        box-shadow: inset 0 0 60px rgba(120,200,255,.12); z-index: 6; }
+  #qr { position: absolute; right: 2%; bottom: 9%; width: 16%; background: #fff; padding: .8%; display: none; image-rendering: pixelated; z-index: 4; }
+  #qr img { width: 100%; display: block; }
+
+  #qr.pair { right: auto; bottom: auto; left: 33%; top: 47%; width: 26%; transform: translate(-50%, -50%); padding: 1.2%; }
+  #pad { position: absolute; inset: 0; display: none; background: #111; }
+  #pad canvas { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="live" muted loop playsinline autoplay preload="auto"></video>
+  <iframe id="yt" allow="autoplay; encrypted-media" tabindex="-1" title=""></iframe>
+  <canvas id="screen" width="320" height="240"></canvas>
+  <div id="qr"></div>
+  <audio id="music" src="audio/soundtrack.mp3" loop preload="auto"></audio>
+  <div id="fx"></div>
+</div>
+<div id="pad"><canvas id="padc"></canvas></div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script>
+/* ============================================================
+   THE GREAT THROW · v5
+   Laptop = target screen (index.html) · Phone = controller (?role=phone&id=XXXX)
+   ============================================================ */
+
+// video: a free-licence video of the capital (Wikimedia Commons, credits in README), smaller versions first.
+// None loading = fallback city. Real time stays: local hour tints the video (night / dusk), real rain is drawn on top.
+const NATIONS = {
+  italy:      { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/a/a8/Fontaine_de_Trevi.webm/Fontaine_de_Trevi.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/a/a8/Fontaine_de_Trevi.webm/Fontaine_de_Trevi.webm.240p.vp9.webm'], lat: 41.90, lon: 12.50,  tz: 'Europe/Rome' },
+  spain:      { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/0/07/Puerta_del_Sol%2C_2012.webm/Puerta_del_Sol%2C_2012.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/0/07/Puerta_del_Sol%2C_2012.webm/Puerta_del_Sol%2C_2012.webm.240p.vp9.webm'], lat: 40.42, lon: -3.70,  tz: 'Europe/Madrid' },
+  france:     { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/1/12/Eiffel_tower_141853_1.webm/Eiffel_tower_141853_1.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/1/12/Eiffel_tower_141853_1.webm/Eiffel_tower_141853_1.webm.240p.vp9.webm'], lat: 48.86, lon: 2.35,   tz: 'Europe/Paris' },
+  germany:    { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/2/2d/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/2/2d/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm/Demo_von_Wikimedia_und_F5_gegen_das_Sicherheitspaket_vor_dem_Brandenburger_Tor_02.webm.240p.vp9.webm'], lat: 52.52, lon: 13.40,  tz: 'Europe/Berlin' },
+  usa:        { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/5/57/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/5/57/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm/2025-12-17_White_House_ballroom_construction_Washington_DC_11-23-28_1.webm.240p.vp9.webm'], lat: 38.89, lon: -77.03, tz: 'America/New_York' },
+  russia:     { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/b/be/A_view_of_Red_Square_MVI_6782.ogv/A_view_of_Red_Square_MVI_6782.ogv.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/b/be/A_view_of_Red_Square_MVI_6782.ogv/A_view_of_Red_Square_MVI_6782.ogv.240p.vp9.webm'], lat: 55.75, lon: 37.62,  tz: 'Europe/Moscow' },
+  china:      { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/f/fc/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/f/fc/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm/%E5%A4%A9%E5%AE%89%E9%97%A8%E7%AD%89%E5%9C%B0%E4%B8%8B%E5%8D%8A%E6%97%97%E6%82%BC%E5%BF%B5%E6%9D%8E%E5%85%8B%E5%BC%BA%E5%90%8C%E5%BF%97.webm.240p.vp9.webm'], lat: 39.90, lon: 116.40, tz: 'Asia/Shanghai' },
+  saudi:      { video: [], yt: { id: 'l9bU24Nu-cc', from: 20, to: 230 }, lat: 24.71, lon: 46.68,  tz: 'Asia/Riyadh' },
+  northkorea: { video: ['https://upload.wikimedia.org/wikipedia/commons/transcoded/4/47/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm.480p.vp9.webm', 'https://upload.wikimedia.org/wikipedia/commons/transcoded/4/47/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm/Donny_Ferguson_-_360_degree_view_of_Pyongyang%2C_North_Korea%2C_from_atop_the_Juche_Tower.webm.240p.vp9.webm'], lat: 39.02, lon: 125.75, tz: 'Asia/Pyongyang' },
+};
+const COUNTRIES = Object.keys(NATIONS);
+
+// Beat X and these two react (see the brief)
+const REACTIONS = {
+  italy: ['france', 'spain'],      spain: ['italy', 'usa'],         france: ['germany', 'saudi'],
+  germany: ['russia', 'china'],    usa: ['china', 'northkorea'],    russia: ['germany', 'china'],
+  china: ['usa', 'northkorea'],    saudi: ['usa', 'france'],        northkorea: ['russia', 'china'],
+};
+
+const CONFIG = { duels: 5, flags: 3, sectors: 3, radius: 84, camMinPixels: 8, flickSpeed: 1.6, growThrow: 1.45, camTolerance: 90 };
+// flickSpeed: sideways speed that counts as a throw (screen-widths per second) · growThrow: how much bigger the phone must get in 0.25 s · camTolerance: colour match after calibration
+
+// Each nation's currency. The coin of the day = how much the currency moved against gold since yesterday.
+const CURRENCY = {
+  italy: 'eur', spain: 'eur', france: 'eur', germany: 'eur', usa: 'usd',
+  russia: 'rub', china: 'cny', saudi: 'sar', northkorea: null, // North Korea: no free market rate → censored coin
+};
+const SYMBOL = { eur: '€', usd: '$', rub: '₽', cny: '¥', sar: '﷼' };
+let GOLD = { eur: 0, usd: 0, rub: 0, cny: 0, sar: 0 }; // % change of gold priced in each currency (fallback: 0)
+
+/* ============================================================
+   MUSIC (audio/soundtrack.mp3 + Web Audio for a real visualiser and the tape-stop effect)
+   ============================================================ */
+const Music = (() => {
+  const el = () => document.getElementById('music');
+  let ctx = null, analyser = null, data = null, muted = false, stopping = null;
+  function start() {
+    const a = el(); if (!a) return;
+    try {
+      if (!ctx) {
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const src = ctx.createMediaElementSource(a); analyser = ctx.createAnalyser(); analyser.fftSize = 64;
+        src.connect(analyser); analyser.connect(ctx.destination); data = new Uint8Array(analyser.frequencyBinCount);
+      }
+      ctx.resume();
+    } catch (e) {}
+    clearInterval(stopping); a.playbackRate = 1; a.muted = muted;
+    a.play().catch(() => {}); // no file yet: stay silent
+  }
+  // crash: the song slows down and dies, like a tape that jams
+  function crash() {
+    const a = el(); if (!a || a.paused) return;
+    clearInterval(stopping);
+    stopping = setInterval(() => { a.playbackRate = Math.max(.25, a.playbackRate - .08); if (a.playbackRate <= .25) { clearInterval(stopping); a.pause(); } }, 50);
+  }
+  function toggleMute() { muted = !muted; el().muted = muted; }
+  // 5 bar levels (0..1) for the taskbar tray
+  function levels() {
+    if (!analyser || el().paused || muted) return [0, 0, 0, 0, 0];
+    analyser.getByteFrequencyData(data);
+    return [1, 3, 6, 10, 16].map(i => data[i] / 255);
+  }
+  return { start, crash, toggleMute, levels, get muted() { return muted; } };
+})();
+
+/* ============================================================
+   MODEM: a synthesised dial-up connection (original sound, made with Web Audio)
+   ============================================================ */
+const Modem = (() => {
+  let ctx = null, out = null;
+  function unlock() { try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); ctx.resume(); } catch (e) {} }
+  function tone(f, t0, d, type, vol) {
+    const o = ctx.createOscillator(), gn = ctx.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(f, t0);
+    gn.gain.setValueAtTime(vol || .08, t0); gn.gain.setValueAtTime(0, t0 + d);
+    o.connect(gn); gn.connect(out); o.start(t0); o.stop(t0 + d + .02); return o;
+  }
+  function noise(t0, d, freq) {
+    const len = Math.floor(ctx.sampleRate * d), buf = ctx.createBuffer(1, len, ctx.sampleRate), ch = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), gn = ctx.createGain();
+    src.buffer = buf; bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 3; gn.gain.value = .12;
+    src.connect(bp); bp.connect(gn); gn.connect(out); src.start(t0);
+  }
+  function play() {
+    if (!ctx) return;
+    try {
+      out = ctx.createGain(); out.gain.value = .9; out.connect(ctx.destination);
+      let t = ctx.currentTime + .05;
+      const keys = [[697, 1209], [770, 1336], [852, 1477], [941, 1336], [697, 1336], [770, 1477], [852, 1209]];
+      keys.forEach(([a, b]) => { tone(a, t, .08); tone(b, t, .08); t += .13; });             // dialling
+      t += .25; tone(2100, t, .6, 'sine', .06); t += .65;                                    // answer tone
+      for (let i = 0; i < 6; i++) { const o = tone(980 + i * 120, t, .14, 'square', .03); o.frequency.linearRampToValueAtTime(1650 + i * 90, t + .14); t += .16; } // handshake
+      noise(t, .9, 1800); tone(1200, t, .9, 'sawtooth', .02); t += .95;
+      noise(t, .6, 2400);
+    } catch (e) {}
+  }
+  function stop() { try { if (out) { out.gain.setValueAtTime(0, ctx.currentTime); out.disconnect(); out = null; } } catch (e) {} }
+  return { unlock, play, stop };
+})();
+
+const role = new URLSearchParams(location.search).get('role');
+if (role === 'phone') startPhone(); else startTarget();
+
+/* ============================================================
+   FLAGS (pixel art, no text)
+   ============================================================ */
+function flag(g, id, x, y, w, h) {
+  x = Math.round(x); y = Math.round(y); w = Math.max(3, Math.round(w)); h = Math.max(2, Math.round(h));
+  const v = c => c.forEach((col, i) => { g.fillStyle = col; g.fillRect(x + Math.floor(i * w / c.length), y, Math.ceil(w / c.length), h); });
+  const o = c => c.forEach((col, i) => { g.fillStyle = col; g.fillRect(x, y + Math.floor(i * h / c.length), w, Math.ceil(h / c.length)); });
+  const px = (fx, fy, fw, fh, col) => { g.fillStyle = col; g.fillRect(x + Math.round(fx * w), y + Math.round(fy * h), Math.max(1, Math.round(fw * w)), Math.max(1, Math.round(fh * h))); };
+  switch (id) {
+    case 'italy': v(['#009246', '#f1f2f1', '#ce2b37']); break;
+    case 'france': v(['#0055a4', '#f1f2f1', '#ef4135']); break;
+    case 'germany': o(['#111', '#dd0000', '#ffce00']); break;
+    case 'russia': o(['#f1f2f1', '#0039a6', '#d52b1e']); break;
+    case 'spain': o(['#aa151b', '#f1bf00', '#f1bf00', '#aa151b']); break;
+    case 'usa':
+      for (let i = 0; i < 7; i++) { g.fillStyle = i % 2 ? '#f1f2f1' : '#b22234'; g.fillRect(x, y + Math.floor(i * h / 7), w, Math.ceil(h / 7)); }
+      px(0, 0, .42, .55, '#3c3b6e'); break;
+    case 'china': g.fillStyle = '#de2910'; g.fillRect(x, y, w, h); px(.1, .15, .16, .24, '#ffde00'); break;
+    case 'saudi': g.fillStyle = '#006c35'; g.fillRect(x, y, w, h); px(.2, .62, .6, .08, '#f1f2f1'); px(.25, .3, .5, .12, '#f1f2f1'); break;
+    case 'northkorea': o(['#024fa2', '#f1f2f1', '#be0000', '#be0000', '#f1f2f1', '#024fa2']); px(.22, .3, .2, .4, '#f1f2f1'); px(.26, .37, .12, .26, '#be0000'); break;
+  }
+}
+
+/* ============================================================
+   LAPTOP · TARGET SCREEN
+   ============================================================ */
+function startTarget() {
+  const cv = document.getElementById('screen'), g = cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  const W = 320, H = 240, CX = 160, CY = 116;
+  const WIN = { x: 44, y: 8, w: 232, h: 212 };
+
+  const S = {
+    scene: 'off', t: 0, sel: 0, me: null, rival: null, loaded: 0, dataDone: 0,
+    wheel: 0, speed: .7, flights: [], planted: [], left: 0, influence: 0,
+    crash: null, weather: {}, phone: false, world: load(),
+  };
+  window.GT = S; // game state, handy in the browser console for testing
+  function load() { try { return JSON.parse(localStorage.getItem('gt-world')) || { conquests: {}, open: [], cards: [] }; } catch (e) { return { conquests: {}, open: [], cards: [] }; } }
+  function save() { try { localStorage.setItem('gt-world', JSON.stringify(S.world)); } catch (e) {} }
+
+  // --- sprites + collision masks
+  const SPR = {};
+  COUNTRIES.forEach(id => {
+    const im = new Image(); SPR[id] = { im, ok: false, mask: null };
+    im.onerror = () => S.loaded++;
+    im.onload = () => {
+      SPR[id].ok = true; S.loaded++;
+      try { const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; const cg = c.getContext('2d'); cg.drawImage(im, 0, 0); SPR[id].mask = cg.getImageData(0, 0, im.width, im.height); }
+      catch (e) { SPR[id].mask = null; } // opened as a local file: approximate collision
+    };
+    im.src = 'img/' + id + '.png';
+  });
+
+  // --- real-world data
+  // gold today vs yesterday, priced in every currency (free currency-api on jsDelivr, no key)
+  const iso = d => d.toISOString().slice(0, 10);
+  const goldOn = date => fetch(`https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${date}/v1/currencies/xau.json`).then(r => r.json()).then(d => d.xau);
+  Promise.all([goldOn('latest'), goldOn(iso(new Date(Date.now() - 864e5))).catch(() => goldOn(iso(new Date(Date.now() - 2 * 864e5))))]).then(([now, before]) => {
+    Object.keys(GOLD).forEach(c => { if (now[c] && before[c]) GOLD[c] = (now[c] / before[c] - 1) * 100; });
+  }).catch(() => {}).finally(() => S.dataDone++);
+  { const a = document.getElementById('music'); let once = false; const ok = () => { if (!once) { once = true; S.loaded++; } }; a.addEventListener('canplaythrough', ok); a.addEventListener('error', ok); setTimeout(ok, 4000); }
+  COUNTRIES.forEach(id => {
+    const n = NATIONS[id];
+    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${n.lat}&longitude=${n.lon}&current=cloud_cover,precipitation`)
+      .then(r => r.json()).then(d => { if (d.current) S.weather[id] = { clouds: d.current.cloud_cover, rain: d.current.precipitation }; }).catch(() => {}).finally(() => S.dataDone++);
+  });
+  // strength of a coin: if gold got more expensive in your currency, your coin got weaker
+  const strength = id => CURRENCY[id] ? -GOLD[CURRENCY[id]] : null;
+  // who starts: the coin that grew most today against gold; same currency or a censored coin → toss a coin
+  function decide() {
+    const a = strength(S.me), b = strength(S.rival);
+    S.toss = a === null || b === null || CURRENCY[S.me] === CURRENCY[S.rival];
+    S.meFirst = S.toss ? Math.random() < .5 : a >= b;
+  }
+  const clock = (id, withMinutes) => {
+    const f = new Intl.DateTimeFormat('en-GB', { timeZone: NATIONS[id].tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+    return withMinutes ? f : Number(f.slice(0, 2)) % 24;
+  };
+
+  // --- live camera of the square
+  // --- video of the capital: try each source until one plays; otherwise the drawn city
+  const Live = (() => {
+    const v = document.getElementById('live'), yt = document.getElementById('yt'); v.muted = true;
+    let want = null, list = [], idx = 0, playing = false, timer = 0; const dead = {};
+    v.addEventListener('playing', () => { playing = true; clearTimeout(timer); v.style.visibility = 'visible'; });
+    v.addEventListener('error', () => next());
+    function next() {   // try the next file; if one is not playing within 8 s, skip it
+      playing = false; v.style.visibility = 'hidden'; clearTimeout(timer);
+      if (idx >= list.length) { if (want) dead[want] = true; v.removeAttribute('src'); return; }
+      v.src = list[idx++]; v.play().catch(() => {});
+      timer = setTimeout(() => { if (!playing) next(); }, 8000);
+    }
+    function showYT(c) {   // muted, no controls, loops a stretch with no people
+      v.pause(); v.style.visibility = 'hidden';
+      const src = `https://www.youtube.com/embed/${c.id}?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&iv_load_policy=3&loop=1&playlist=${c.id}&start=${c.from}&end=${c.to}&playsinline=1&rel=0&cc_load_policy=0&cc_lang_pref=zz`;
+      if (yt.src !== src) yt.src = src;
+      yt.onload = () => setTimeout(() => { if (want && NATIONS[want].yt) { playing = true; yt.style.visibility = 'visible'; } }, 1800);   // hide YouTube's own title fade-in
+    }
+    function show(id) {
+      if (id === want) return;
+      want = id; idx = 0; list = (id && NATIONS[id].video) || []; clearTimeout(timer);
+      yt.style.visibility = 'hidden'; playing = false;
+      if (id && NATIONS[id].yt) return showYT(NATIONS[id].yt);
+      if (yt.src) yt.removeAttribute('src');
+      if (!id || !list.length || dead[id]) { v.style.visibility = 'hidden'; v.pause(); return; }
+      next();
+    }
+    // some browsers block autoplay until the first click: try again then
+    addEventListener('pointerdown', () => { if (want && !playing && v.src) v.play().catch(() => {}); });
+    return { show, isPlaying: id => playing && want === id };
+  })();
+  const live = id => Live.show(id);
+
+
+  // --- phone controller (PeerJS)
+  const code = String(Math.floor(1000 + Math.random() * 9000));
+  try {
+    const peer = new Peer('greatthrow-' + code);
+    peer.on('open', () => {
+      S.peerOk = true; updateQR();
+    });
+    peer.on('connection', conn => {
+      S.conn = conn;
+      conn.on('open', () => { S.phone = true; updateQR(); sendFlag(); });
+      conn.on('data', d => {
+        S.signal = 1; // tray phone icon flashes: a message arrived
+        if (d.type === 'tap') { if (S.scene === 'duel') throwAtAim(); else press(); }
+        const r = CONFIG.radius * .95, ax = CX + (d.x - .5) * 2.2 * r, ay = CY + (d.y - .5) * 2.2 * r;
+        if (d.type === 'aim') { S.aim = { x: ax, y: ay, t: 1 }; }
+        if (d.type === 'throw') {
+          if (S.scene !== 'duel') return press(); // lifting the finger also moves the game forward
+          throwFlag(ax, ay); S.aim = null;
+        }
+      });
+      conn.on('close', () => { S.phone = false; S.conn = null; updateQR(); });
+    });
+  } catch (e) { console.warn('PeerJS unavailable: single-player mode'); }
+  function sendFlag() { try { if (S.conn && S.phone && S.me) S.conn.send({ type: 'flag', id: S.world.conquests[S.me] || S.me }); } catch (e) {} }
+  function makeQR() {
+    const b = document.getElementById('qr'), url = location.origin + location.pathname + '?role=phone&flag=' + (S.me || COUNTRIES.find(id => owner(id) === 0) || 'italy') + '&id=' + code;
+    if (b.dataset.url === url || typeof qrcode === 'undefined') return;
+    const qr = qrcode(0, 'M'); qr.addData(url); qr.make(); b.innerHTML = qr.createImgTag(4, 0); b.dataset.url = url; console.log('Phone:', url);
+  }
+  function updateQR() { const b = document.getElementById('qr'); if (S.scene === 'pair') makeQR(); const on = S.scene === 'pair' && b.innerHTML; b.style.display = on ? 'block' : 'none'; b.classList.toggle('pair', !!on); }
+
+  // --- WEBCAM TRACKER: finds the pink phone screen, aims with it, throws on a flick
+  // A real throw goes TOWARDS the screen: for the webcam the phone mostly gets BIGGER, so both are measured:
+  // sideways speed + sudden growth. "power" (0..1) is shown in the duel so players see how hard to throw.
+  const Cam = (() => {
+    const v = document.createElement('video'); v.muted = true; v.playsInline = true;
+    const c = document.createElement('canvas'); c.width = 80; c.height = 60; const cg = c.getContext('2d', { willReadFrequently: true });
+    const T = { on: false, found: false, x: .5, y: .5, n: 0, seen: 0, hist: [], lastThrow: 0, power: 0, target: null, video: v };
+    T.start = () => {
+      if (T.on || !navigator.mediaDevices) return;
+      T.on = 'asking';
+      navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240, facingMode: 'user' } })
+        .then(st => { v.srcObject = st; v.play(); T.on = true; })
+        .catch(() => { T.on = false; T.denied = true; });
+    };
+    // calibration: learn the exact pink of this phone in this light (click on it in the preview)
+    T.calibrate = (fx, fy) => {
+      if (T.on !== true) return;
+      cg.drawImage(v, 0, 0, 80, 60);
+      const px = Math.round((1 - fx) * 79), py = Math.round(fy * 59), d = cg.getImageData(Math.max(0, px - 1), Math.max(0, py - 1), 3, 3).data;
+      let r = 0, g2 = 0, b = 0; for (let i = 0; i < d.length; i += 4) { r += d[i]; g2 += d[i + 1]; b += d[i + 2]; }
+      T.target = [r / 9, g2 / 9, b / 9]; T.flash = 1;
+    };
+    const isPink = (r, g2, b) => T.target
+      ? Math.abs(r - T.target[0]) + Math.abs(g2 - T.target[1]) + Math.abs(b - T.target[2]) < CONFIG.camTolerance
+      : r > 120 && b > 90 && r - g2 > 55 && b - g2 > 30;
+    T.tick = (dt, now) => {
+      if (T.on !== true || v.readyState < 2) return;
+      cg.drawImage(v, 0, 0, 80, 60);
+      const d = cg.getImageData(0, 0, 80, 60).data;
+      let sx = 0, sy = 0, n = 0;
+      for (let i = 0, p = 0; i < d.length; i += 4, p++) if (isPink(d[i], d[i + 1], d[i + 2])) { sx += p % 80; sy += (p / 80) | 0; n++; }
+      const was = T.found; T.found = n >= CONFIG.camMinPixels;
+      let speed = 0, grow = 0;
+      if (T.found) {
+        const nx = 1 - sx / n / 80, ny = sy / n / 60;                                 // mirrored, like a mirror
+        speed = Math.hypot(nx - T.x, ny - T.y) / Math.max(dt, .001);
+        const old = T.hist.find(h => now - h.t < .25);                                 // size a quarter of a second ago
+        if (old && old.n > 0) grow = n / old.n;
+        T.x += (nx - T.x) * .45; T.y += (ny - T.y) * .45; T.seen += dt; T.n = n;
+        T.hist.push({ t: now, x: T.x, y: T.y, n }); while (T.hist.length && now - T.hist[0].t > .6) T.hist.shift();
+      } else T.seen = 0;
+      // power: the strongest of the two signals, relative to the sensitivity
+      const p = Math.max(speed / CONFIG.flickSpeed, (grow - 1) / (CONFIG.growThrow - 1));
+      T.power = Math.max(p, T.power - dt * 2.5);
+      const vanished = was && !T.found && T.power > .5;                                // motion blur: the phone vanishes mid-throw
+      if ((p >= 1 || vanished) && now - T.lastThrow > .6 && T.hist.length) {
+        T.lastThrow = now; T.power = 1;
+        const aimAt = T.hist.find(h => now - h.t < .35) || T.hist[0];                  // where you aimed just before the throw
+        if (T.onThrow) T.onThrow(aimAt.x, aimAt.y);
+      }
+    };
+    return T;
+  })();
+  const camAim = (x, y) => { const r = CONFIG.radius * .95, k = v => Math.max(0, Math.min(1, (v - .2) / .6)), dx = (k(x) - .5) * 2.2 * r, dy = (k(y) - .5) * 2.2 * r, m = Math.min(1, r / Math.max(1e-6, Math.hypot(dx, dy))); return { x: CX + dx * m, y: CY + dy * m }; }; // always on the wheel
+  Cam.onThrow = (x, y) => { S.signal = 1; if (S.scene === 'duel') { const a = camAim(x, y); throwFlag(a.x, a.y); } else if (S.t > 1 && S.scene !== 'pair') press(); }; // outside the duel a throw = OK
+  // backup triggers: a tap on the phone or the space bar throws at the current aim
+  function throwAtAim() { const a = Cam.found ? camAim(Cam.x, Cam.y) : S.aim || { x: CX, y: CY - 70 }; throwFlag(a.x, a.y); Cam.power = 1; }
+  function camPreview(x, y, w, h) {
+    if (Cam.on !== true) return;
+    g.save(); g.translate(x + w, y); g.scale(-1, 1); g.drawImage(Cam.video, 0, 0, w, h); g.restore();   // mirrored
+    g.strokeStyle = Cam.found ? '#7dff9a' : '#ff5a4a'; g.lineWidth = 2; g.strokeRect(x, y, w, h);
+    if (Cam.found) { g.fillStyle = '#ff2bd6'; g.fillRect(x + Cam.x * w - 2, y + Cam.y * h - 2, 4, 4); }
+  }
+
+  // --- SCENARIO CARDS: beat a country and it opens a real political dossier: the two countries that react are your only next rivals
+  const CARDS = {
+    italy: 'migration', spain: 'ballot', france: 'veto', germany: 'industry', usa: 'tariffs',
+    russia: 'gas', china: 'surveillance', saudi: 'oil', northkorea: 'missile',
+  };
+  // pixel icons, drawn in a 16x16 box (no text)
+  function cardIcon(kind, x, y, s) {
+    const p = (px, py, w, h, c) => { g.fillStyle = c; g.fillRect(x + px * s, y + py * s, w * s, h * s); };
+    switch (kind) {
+      case 'migration': p(0, 12, 16, 2, '#3a7bf0'); p(2, 14, 12, 2, '#245edb'); p(3, 9, 10, 3, '#8a5a2b'); p(7, 3, 1, 6, '#ddd'); p(8, 4, 4, 4, '#f4efe6'); p(4, 7, 2, 2, '#f1c27d'); p(10, 7, 2, 2, '#f1c27d'); break; // boat on the waves
+      case 'ballot': p(3, 6, 10, 8, '#245edb'); p(5, 6, 6, 1, '#0a246a'); p(6, 1, 4, 6, '#f4efe6'); p(7, 3, 2, 1, '#c0392b'); break;                            // ballot box
+      case 'veto': p(5, 3, 2, 8, '#f1c27d'); p(7, 2, 2, 9, '#f1c27d'); p(9, 3, 2, 8, '#f1c27d'); p(11, 5, 2, 6, '#f1c27d'); p(4, 9, 9, 5, '#f1c27d'); p(3, 7, 2, 4, '#f1c27d'); break; // raised hand
+      case 'industry': for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; p(7 + Math.round(Math.cos(a) * 5), 7 + Math.round(Math.sin(a) * 5), 2, 2, '#aab'); } p(4, 4, 8, 8, '#aab'); p(6, 6, 4, 4, '#334'); break; // gear
+      case 'tariffs': p(1, 5, 14, 8, '#c0392b'); for (let i = 0; i < 6; i++) p(2 + i * 2, 6, 1, 6, '#8e2a20'); p(6, 1, 4, 4, '#ffd34a'); p(7, 2, 2, 2, '#c0392b'); break;     // container + padlock
+      case 'gas': p(2, 7, 12, 3, '#888'); p(6, 3, 4, 10, '#666'); p(4, 1, 8, 2, '#c0392b'); break;                                                                // shut valve
+      case 'surveillance': p(1, 6, 14, 5, '#f4efe6'); p(3, 5, 10, 1, '#f4efe6'); p(3, 11, 10, 1, '#f4efe6'); p(6, 6, 4, 5, '#245edb'); p(7, 7, 2, 3, '#000'); break;     // eye
+      case 'oil': p(4, 2, 8, 12, '#d4a017'); p(4, 5, 8, 1, '#8a6418'); p(4, 10, 8, 1, '#8a6418'); p(6, 0, 4, 2, '#d4a017'); break;                            // gold barrel
+      case 'arms': p(1, 8, 6, 6, '#6b5a2b'); p(9, 8, 6, 6, '#6b5a2b'); p(2, 10, 4, 1, '#3a2f15'); p(10, 10, 4, 1, '#3a2f15'); p(4, 3, 8, 2, '#888'); p(10, 2, 3, 4, '#888'); p(6, 5, 1, 3, '#888'); break;    // crates + rifle
+      case 'sanctions': p(2, 6, 12, 9, '#c9a227'); p(4, 1, 2, 6, '#bbb'); p(10, 1, 2, 6, '#bbb'); p(4, 1, 8, 2, '#bbb'); p(7, 9, 2, 3, '#3a2f15'); break;                                   // padlock
+      case 'summit': g.fillStyle = '#8a5a2b'; g.beginPath(); g.ellipse(x + 8 * s, y + 9 * s, 7 * s, 4 * s, 0, 0, Math.PI * 2); g.fill(); ['#ce2b37', '#0055a4', '#ffce00', '#009246', '#de2910', '#fff'].forEach((c, i) => { const a = i / 6 * Math.PI * 2; p(7 + Math.round(Math.cos(a) * 7), 8 + Math.round(Math.sin(a) * 5), 2, 2, c); }); break; // round table
+      case 'alliance': p(1, 7, 6, 4, '#f1c27d'); p(9, 7, 6, 4, '#e0ac69'); p(6, 6, 4, 6, '#f1c27d'); p(0, 6, 2, 6, '#245edb'); p(14, 6, 2, 6, '#c0392b'); break;                       // handshake
+      case 'roulette': for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? '#111' : '#c0392b'; g.beginPath(); g.moveTo(x + 8 * s, y + 8 * s); g.arc(x + 8 * s, y + 8 * s, 7 * s, i * Math.PI / 4 + S.t * 4, (i + 1) * Math.PI / 4 + S.t * 4); g.fill(); } p(7, 7, 2, 2, '#ffd34a'); break; // spinning wheel
+      case 'debt': g.fillStyle = '#d4a017'; g.beginPath(); g.arc(x + 6 * s, y + 8 * s, 5 * s, 0, Math.PI * 2); g.fill(); p(4, 6, 4, 1, '#8a6418'); p(4, 9, 4, 1, '#8a6418'); p(12, 3, 2, 9, '#c0392b'); p(10, 10, 6, 2, '#c0392b'); p(11, 12, 4, 1, '#c0392b'); p(12, 13, 2, 1, '#c0392b'); break; // coin + falling arrow
+      case 'car': p(2, 8, 12, 4, '#c0392b'); p(4, 5, 8, 3, '#c0392b'); p(5, 6, 6, 2, '#9fd0ff'); p(3, 12, 3, 3, '#111'); p(10, 12, 3, 3, '#111'); break;          // car (exports)
+      case 'expo': p(7, 1, 2, 13, '#ccc'); p(4, 6, 8, 2, '#ccc'); p(2, 13, 12, 2, '#888'); p(6, 0, 4, 2, '#ffd34a'); break;                                       // expo tower
+      case 'port': p(0, 12, 16, 4, '#245edb'); p(2, 8, 12, 4, '#c0392b'); p(4, 5, 3, 3, '#2f9e3a'); p(8, 5, 3, 3, '#ffd34a'); p(13, 1, 1, 8, '#888'); p(10, 1, 4, 1, '#888'); break; // port: ship + crane
+      case 'base': p(1, 13, 14, 2, '#5a6b3a'); p(6, 4, 4, 8, '#888'); p(2, 7, 12, 2, '#888'); p(5, 11, 6, 1, '#888'); p(7, 1, 2, 3, '#888'); break;                // air base: jet
+      case 'raid': p(4, 1, 8, 14, '#8a5a2b'); p(5, 2, 6, 12, '#6b4420'); p(9, 8, 1, 1, '#ffd34a'); p(1, 6, 3, 1, '#fff'); p(12, 6, 3, 1, '#fff'); p(0, 9, 3, 1, '#fff'); break; // door kicked in
+      case 'hack': p(1, 1, 14, 11, '#aab'); p(2, 2, 12, 9, '#000'); p(5, 3, 6, 4, '#3f3'); p(6, 7, 4, 2, '#3f3'); p(6, 4, 1, 2, '#000'); p(9, 4, 1, 2, '#000'); p(7, 8, 1, 1, '#000'); p(6, 12, 4, 2, '#888'); p(4, 14, 8, 1, '#888'); break; // cyber attack
+      case 'missile': p(7, 1, 2, 2, '#c0392b'); p(6, 3, 4, 9, '#ccc'); p(4, 10, 2, 4, '#888'); p(10, 10, 2, 4, '#888'); p(7, 12, 2, 3, '#ffb000'); break;               // missile
+    }
+  }
+  // a trading card: nation-coloured frame, icon in the middle
+  function card(kind, from, x, y, w, h, flipX, blink, open) {
+    g.save(); g.translate(x + w / 2, y + h / 2); g.scale(flipX === undefined ? 1 : Math.max(.05, Math.abs(flipX)), 1); g.translate(-w / 2, -h / 2);
+    if (flipX !== undefined && flipX < 0) { // back of the card
+      g.fillStyle = '#0a246a'; g.fillRect(0, 0, w, h); for (let i = 0; i < 6; i++) { g.fillStyle = i % 2 ? '#f4efe6' : '#d32626'; g.beginPath(); g.arc(w / 2, h / 2, (6 - i) * w / 14, 0, Math.PI * 2); g.fill(); }
+    } else {
+      g.fillStyle = '#ffe680'; g.fillRect(0, 0, w, h);
+      flag(g, from, 2, 2, w - 4, Math.round(h * .22));
+      g.fillStyle = '#1b1b3a'; g.fillRect(2, Math.round(h * .26), w - 4, h - Math.round(h * .26) - 2);
+      const s = Math.max(1, Math.floor(Math.min(w - 8, h * .38) / 16)); cardIcon(kind, Math.round((w - 16 * s) / 2), Math.round(h * .31), s);
+      const r = (open || []).slice(0, 4), n = Math.max(1, r.length), fw = Math.round((w - 6 - (n - 1) * 2) / Math.max(2, n)), fh = Math.round(fw * .66), fy = h - fh - 5, ox = Math.round((w - n * fw - (n - 1) * 2) / 2);
+      if (h > 30) r.forEach((id, i) => { if (!(blink && Math.floor(S.t * 4) % 2)) flag(g, id, ox + i * (fw + 2), fy, fw, fh); });
+      if (h > 30 && kind === 'alliance' && r.length === 2) { g.fillStyle = '#f1c27d'; g.fillRect(ox + fw - 2, fy + fh / 2 - 1, 6, 3); } // handshake between the two
+    }
+    g.restore();
+  }
+
+  // --- SCENARIO CARDS (like Monopoly's Chance cards): after every win a card appears on its own,
+  // tells a small real-politics story and decides who you can challenge next.
+  // STORIES: for every beaten country, real links towards every other country (1 country = forced, more = choice)
+  const STORIES = {
+    italy:      [{ kind: 'migration', opens: ['spain', 'france'] }, { kind: 'debt', opens: ['germany'] }, { kind: 'port', opens: ['china'] },
+                 { kind: 'gas', opens: ['russia'] }, { kind: 'tariffs', opens: ['usa'] }, { kind: 'expo', opens: ['saudi'] }, { kind: 'summit', opens: ['northkorea'] }],
+    spain:      [{ kind: 'migration', opens: ['italy', 'france'] }, { kind: 'base', opens: ['usa'] }, { kind: 'arms', opens: ['saudi'] },
+                 { kind: 'car', opens: ['china'] }, { kind: 'debt', opens: ['germany'] }, { kind: 'raid', opens: ['northkorea'] }, { kind: 'sanctions', opens: ['russia'] }],
+    france:     [{ kind: 'industry', opens: ['germany'] }, { kind: 'arms', opens: ['saudi'] }, { kind: 'veto', opens: ['usa', 'russia', 'china'] },
+                 { kind: 'migration', opens: ['italy', 'spain'] }, { kind: 'missile', opens: ['northkorea'] }],
+    germany:    [{ kind: 'gas', opens: ['russia'] }, { kind: 'car', opens: ['china'] }, { kind: 'debt', opens: ['italy', 'spain'] },
+                 { kind: 'tariffs', opens: ['usa'] }, { kind: 'industry', opens: ['france'] }, { kind: 'arms', opens: ['saudi'] }, { kind: 'sanctions', opens: ['northkorea'] }],
+    usa:        [{ kind: 'tariffs', opens: ['china'] }, { kind: 'oil', opens: ['saudi'] }, { kind: 'missile', opens: ['northkorea'] },
+                 { kind: 'tariffs', opens: ['germany', 'france', 'italy', 'spain'] }, { kind: 'sanctions', opens: ['russia'] }],
+    russia:     [{ kind: 'gas', opens: ['germany', 'italy', 'spain'] }, { kind: 'alliance', opens: ['china', 'northkorea'] }, { kind: 'oil', opens: ['saudi'] },
+                 { kind: 'sanctions', opens: ['usa', 'france'] }, { kind: 'hack', opens: ['usa', 'germany', 'france'] }],
+    china:      [{ kind: 'tariffs', opens: ['usa'] }, { kind: 'alliance', opens: ['northkorea', 'russia'] }, { kind: 'car', opens: ['germany', 'spain', 'france'] },
+                 { kind: 'port', opens: ['italy'] }, { kind: 'oil', opens: ['saudi'] }, { kind: 'hack', opens: ['usa', 'germany'] }],
+    saudi:      [{ kind: 'oil', opens: ['usa', 'russia'] }, { kind: 'arms', opens: ['france', 'spain'] }, { kind: 'expo', opens: ['italy'] },
+                 { kind: 'oil', opens: ['china'] }, { kind: 'arms', opens: ['germany'] }, { kind: 'missile', opens: ['northkorea'] }],
+    northkorea: [{ kind: 'alliance', opens: ['china', 'russia'] }, { kind: 'missile', opens: ['usa'] }, { kind: 'veto', opens: ['france'] },
+                 { kind: 'raid', opens: ['spain'] }, { kind: 'sanctions', opens: ['germany', 'italy'] }, { kind: 'oil', opens: ['saudi'] }, { kind: 'hack', opens: ['usa'] }],
+  };
+  const NAME = { italy: 'Italy', spain: 'Spain', france: 'France', germany: 'Germany', usa: 'USA', russia: 'Russia', china: 'China', saudi: 'Saudi Arabia', northkorea: 'North Korea' };
+  const NEWS = {
+    migration:    ['MIGRATION CRISIS', 'Boats keep landing in {A}. {A} blames {B}.'],
+    ballot:       ['SNAP ELECTION', '{A} goes to the polls. {B} is watching closely.'],
+    veto:         ['UN VETO', '{A} blocks the Security Council. {B} is furious.'],
+    industry:     ['INDUSTRIAL RIVALRY', '{A} and {B} fight over who builds Europe.'],
+    tariffs:      ['TRADE WAR', '{A} slaps tariffs on {B}. {B} hits back.'],
+    gas:          ['GAS WAR', 'The pipeline between {A} and {B} runs dry. Winter is coming.'],
+    surveillance: ['SPY SCANDAL', '{A} was listening to the phone calls of {B}.'],
+    oil:          ['OIL SHOCK', '{A} and {B} fight over the price of a barrel.'],
+    arms:         ['ARMS DEAL', '{A} and {B} sign a billion-dollar weapons deal. It goes wrong.'],
+    sanctions:    ['SANCTIONS', '{A} and {B} freeze each other\'s money.'],
+    summit:       ['SUMMIT', '{A} and {B} meet for a photo. The handshake goes wrong.'],
+    alliance:     ['BROKEN ALLIANCE', '{A} and {B} were friends. Not anymore.'],
+    roulette:     ['ROULETTE', 'The world spins. Nobody chose this war: {A} against {B}.'],
+    debt:         ['DEBT CRISIS', '{A} and {B} argue over who pays the bill.'],
+    car:          ['CAR WAR', 'Cars from {A} flood the roads of {B}.'],
+    expo:         ['EXPO WAR', '{A} and {B} fight to host the World Expo.'],
+    port:         ['PORT DEAL', 'A port changes hands between {A} and {B}. Who controls the sea?'],
+    base:         ['MILITARY BASE', '{B} keeps soldiers in {A}. {A} wants them out.'],
+    raid:         ['EMBASSY RAID', 'Masked men raid an embassy. {A} accuses {B}.'],
+    missile:      ['MISSILE TEST', 'A missile flies over the sea. {A} and {B} are on alert.'],
+    hack:         ['CYBER ATTACK', 'Hackers from {A} break into {B}\'s servers. The lights go out.'],
+  };
+  function headline(c) { const n = NEWS[c.kind] || NEWS.roulette, f = t => t.replace(/\{A\}/g, NAME[c.a]).replace(/\{B\}/g, NAME[c.b]); return [n[0], f(n[1])]; }
+  function wrap(text, x, y, maxW, lh) {
+    const words = text.split(' '); let line = '';
+    words.forEach(w => { const t = line ? line + ' ' + w : w; if (g.measureText(t).width > maxW && line) { g.fillText(line, x, y); y += lh; line = w; } else line = t; });
+    g.fillText(line, x, y);
+  }
+  // players own countries: S.world.owner[id] = 0..3 (null = neutral). S.world.conquests[id] = flag flying over it
+  const PCOL = ['#ff2bd6', '#3ad8ff', '#ffe040', '#7dff9a'];
+  const owner = id => { const o = S.world.owner[id]; return o === undefined ? null : o; };
+  const enemies = (a, b) => owner(a) !== owner(b) && (owner(a) !== null || owner(b) !== null);
+  const flagOf = id => S.world.conquests[id] || id;
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  // after a duel: a real story of the winning country points at its next rival; no story left → roulette
+  function scenarioAfter(winner) {
+    const stories = winner ? (STORIES[winner] || []).map(sc => ({ sc, o: sc.opens.filter(id => id !== winner && enemies(winner, id)) })).filter(x => x.o.length) : [];
+    if (winner && owner(winner) !== null && stories.length) { const { sc, o } = pick(stories); return { kind: sc.kind, from: winner, a: winner, b: pick(o), open: o }; }
+    const pairs = []; COUNTRIES.forEach(a => COUNTRIES.forEach(b => { if (a < b && enemies(a, b)) pairs.push(owner(a) === null ? [b, a] : [a, b]); }));
+    const pvp = pairs.filter(([a, b]) => owner(b) !== null);   // the roulette prefers player against player
+    const [a, b] = pick(pvp.length ? pvp : pairs); return { kind: 'roulette', from: a, a, b, open: [b] };
+  }
+  function players() { return [...Array(S.n).keys()]; }
+  function countOf(p) { return COUNTRIES.filter(id => owner(id) === p).length; }
+
+  // --- laptop input
+  const pos = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
+  cv.addEventListener('pointerdown', e => {
+    const p = pos(e);
+    if (p.y > 226 && p.x > 252 && p.x < 280) return Music.toggleMute();
+    if (S.scene === 'pair' && p.x >= 170 && p.x <= 258 && p.y >= 72 && p.y <= 138) return Cam.calibrate((p.x - 170) / 88, (p.y - 72) / 66);
+    if (S.scene === 'pair') { if (p.x < WIN.x + 30 && p.y > 188 && p.y < 216) go('win'); return; }   // only the mouse icon: play without a phone
+    if (S.scene === 'duel') return throwFlag(p.x, p.y);
+    if (S.scene === 'draft') {
+      const i = Math.floor((p.x - 8) / 34);
+      if (i >= 0 && i < 9 && p.y > 60 && p.y < 200) { if (owner(COUNTRIES[i]) !== null) return; if (i === S.sel) press(); else S.sel = i; return; }
+    }
+    if (S.scene === 'players' && p.y > 60 && p.y < 190) { const i = Math.max(0, Math.min(2, Math.floor((p.x - 40) / 80))); if (i === S.sel) press(); else S.sel = i; return; }
+    press();
+  });
+  addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight') move(1);
+    if (e.key === 'ArrowLeft') move(-1);
+    if (e.key === ' ' && S.scene === 'duel') { e.preventDefault(); return throwAtAim(); }
+    if (e.key === '[' || e.key === ']') { const k = e.key === ']' ? .8 : 1.25; CONFIG.flickSpeed *= k; CONFIG.growThrow = 1 + (CONFIG.growThrow - 1) * k; S.sensShow = 2; } // ] = more sensitive
+    if (e.key === 'Enter' && S.scene === 'pair') return go('win');   // laptop keyboard: play without a phone
+    if (e.key === 'Enter' || e.key === ' ') press();
+  });
+  function move(d) {
+    if (S.scene === 'players') S.sel = (S.sel + d + 3) % 3;
+    if (S.scene === 'draft') for (let i = 0; i < 9; i++) { S.sel = (S.sel + d + 9) % 9; if (owner(COUNTRIES[S.sel]) === null) break; }
+  }
+
+  function go(sc) { S.scene = sc; S.t = 0; if (sc === 'pair') Cam.start(); updateQR(); if (sc === 'crash') Music.crash(); }
+  function press() {
+    const sc = S.scene;
+    if (sc === 'off') { Modem.unlock(); go('splash'); }
+    else if (sc === 'splash' || sc === 'dial') { Modem.stop(); Music.start(); go('title'); } // skip the intro
+    else if (sc === 'title') { Music.start(); S.sel = 0; go('rules'); }
+    else if (sc === 'rules' && S.t > 1.5) go('players');
+    else if (sc === 'players') {                       // how many players: 2, 3 or 4
+      S.n = S.sel + 2; S.world = { conquests: {}, owner: {}, cards: [] }; S.picker = 0; S.duels = 0; S.sel = 0; S.me = null; go('draft');
+    }
+    else if (sc === 'draft') {                         // everybody takes a country in turn until they run out; leftovers stay neutral
+      const id = COUNTRIES[S.sel]; if (owner(id) !== null) return;
+      S.world.owner[id] = S.picker; S.picker = (S.picker + 1) % S.n;
+      const taken = Object.keys(S.world.owner).length;
+      if (taken >= Math.floor(9 / S.n) * S.n) { S.scenario = scenarioAfter(null); S.last = null; Cam.on === true ? go('win') : go('pair'); }
+      else { S.sel = 0; if (owner(COUNTRIES[0]) !== null) move(1); }
+    }
+    else if (sc === 'win' && S.t > 4) nextDuel();
+    else if (sc === 'coins' && S.t > 2.6) duel();
+    else if (sc === 'crash' && S.t > 3) endTurn();
+    else if (sc === 'switch' && S.t > 1.5) duel();
+    else if (sc === 'result' && S.t > 1.5) afterResult();
+    else if (sc === 'ending' && S.t > 2) { S.me = null; go('title'); }
+  }
+
+  // a duel: the two countries the card picked. Each one throws 3 flags at the other's leader;
+  // touching the leader ends your turn with 0. A neutral country does not throw: close the triangle to take it.
+  function nextDuel() {
+    const c = S.scenario; S.duelists = [c.a, c.b]; S.turn = 0; S.scores = [0, 0]; S.closed = [false, false];
+    S.me = c.a; S.rival = c.b; S.world.cards = (S.world.cards || []).concat({ kind: c.kind, from: c.from, open: c.open }); sendFlag(); coins();
+  }
+  function endTurn() {
+    if (S.turn === 0 && owner(S.duelists[1]) !== null) { S.turn = 1; S.me = S.duelists[1]; S.rival = S.duelists[0]; sendFlag(); go('switch'); }
+    else go('result');
+  }
+  function afterResult() {
+    const [a, b] = S.duelists, two = owner(b) !== null;
+    if (two && S.scores[0] === S.scores[1]) { S.turn = 0; S.me = a; S.rival = b; sendFlag(); duel(); return; }   // tie: play again
+    const win = two ? (S.scores[0] > S.scores[1] ? a : b) : (S.closed[0] ? a : null), lose = win === a ? b : a;
+    S.duels++;
+    if (win) { S.world.owner[lose] = owner(win); S.world.conquests[lose] = flagOf(win); }   // the beaten country flies the winner's flag
+    S.last = win;
+    const alive = players().filter(p => countOf(p) > 0);
+    if (alive.length === 1 && COUNTRIES.every(id => owner(id) === alive[0]) || S.duels >= CONFIG.duels) return finish();
+    S.scenario = scenarioAfter(win || b); go('win');
+  }
+  function finish() {   // most countries wins; the winner's home flag covers the screen
+    const best = Math.max(...players().map(countOf)), top = players().filter(p => countOf(p) === best);
+    if (top.length > 1 && S.duels < CONFIG.duels + 3) { S.scenario = scenarioAfter(S.last || S.duelists[1]); go('win'); return; }   // draw: one more duel
+    S.champ = top[0]; S.me = COUNTRIES.find(id => owner(id) === S.champ && !S.world.conquests[id]) || COUNTRIES.find(id => owner(id) === S.champ); go('ending');
+  }
+
+  function coins() {
+    decide(); S.adv = S.meFirst ? S.duelists[0] : S.duelists[1];
+    if (S.adv === S.duelists[1] && owner(S.duelists[1]) !== null) {   // the winning coin throws first
+      S.duelists.reverse(); S.me = S.duelists[0]; S.rival = S.duelists[1]; S.meFirst = true; sendFlag();
+    }
+    go('coins');
+  }
+
+  function duel() {
+    go('duel'); Music.start();
+    S.flights = []; S.planted = []; S.left = CONFIG.flags; S.influence = 0; S.wheel = 0;
+    // the weaker coin gets the advantage: the wheel starts still
+    S.hold = S.adv === S.me ? 1.5 : 0;
+    S.falling = [];
+  }
+
+  // --- throwing
+  function throwFlag(tx, ty) {
+    if (S.left <= 0) return;
+    S.left--;
+    S.flights.push({ tx: tx + (Math.random() - .5) * 5, ty: ty + (Math.random() - .5) * 5, t: 0 });
+  }
+  const leaderScale = () => { const s = SPR[S.rival]; return s && s.ok ? 118 / s.im.height : 1; };
+  function toWheel(x, y) { const dx = x - CX, dy = y - CY, c = Math.cos(-S.wheel), s = Math.sin(-S.wheel); return { x: dx * c - dy * s, y: dx * s + dy * c }; }
+  function toScreen(l) { const c = Math.cos(S.wheel), s = Math.sin(S.wheel); return { x: CX + l.x * c - l.y * s, y: CY + l.x * s + l.y * c }; }
+  function hitsLeader(l) {
+    const sp = SPR[S.rival]; if (!sp || !sp.ok) return Math.abs(l.x) < 25 && Math.abs(l.y) < 55;
+    const k = leaderScale(), sx = Math.floor(l.x / k + sp.im.width / 2), sy = Math.floor(l.y / k + sp.im.height / 2);
+    if (sx < 0 || sy < 0 || sx >= sp.im.width || sy >= sp.im.height) return false;
+    if (!sp.mask) return true;
+    // 2-pixel margin: grazing is skill, touching is a mistake
+    for (let oy = -2; oy <= 2; oy += 2) for (let ox = -2; ox <= 2; ox += 2) {
+      const xx = sx + Math.round(ox / k), yy = sy + Math.round(oy / k);
+      if (xx >= 0 && yy >= 0 && xx < sp.im.width && yy < sp.im.height && sp.mask.data[(yy * sp.im.width + xx) * 4 + 3] > 40) return true;
+    }
+    return false;
+  }
+  function sectors() {
+    const cov = new Array(CONFIG.sectors).fill(false);
+    S.planted.forEach(p => { const a = (Math.atan2(p.l.y, p.l.x) + Math.PI * 2) % (Math.PI * 2); cov[Math.floor(a / (Math.PI * 2) * CONFIG.sectors)] = true; });
+    return cov;
+  }
+
+  function update(dt) {
+    S.t += dt; S.clock = (S.clock || 0) + dt;
+    Cam.tick(dt, S.clock);
+    if (S.scene === 'pair') { S.pairOk = S.phone && Cam.seen > 1 ? (S.pairOk || 0) + dt : 0; if (S.pairOk > .8) go('win'); }   // both ticks green, then go
+    const sc = S.scene, prog = S.loaded / 10;
+    if (sc === 'splash' && ((S.t > 2.2 && prog >= 1) || S.t > 6)) { Modem.play(); go('dial'); }
+    else if (sc === 'dial' && ((S.t > 3 && S.dataDone >= 10) || S.t > 7)) { Modem.stop(); Music.start(); go('title'); }
+    const AUTO = { rules: 25, ending: 10, coins: 4.5, crash: 5, switch: 3.5, result: 3.5, win: 7 };   // the card stays long enough to read it          // nobody has to touch the laptop
+    if (AUTO[S.scene] && S.t > AUTO[S.scene]) press();
+    if (S.scene === 'draft' && Cam.found) {                                         // choose by pointing the phone
+      const list = COUNTRIES.filter(id => owner(id) === null); if (list.length) S.sel = COUNTRIES.indexOf(list[Math.min(list.length - 1, Math.floor(Cam.x * list.length))]);
+    }
+    if (S.scene === 'players' && Cam.found) S.sel = Math.min(2, Math.floor(Cam.x * 3));
+    if (S.scene !== 'duel') return;
+    if (S.hold > 0) S.hold -= dt;
+    else {
+      S.speed = .55 + Math.sin(S.t * .45) * .9;
+      S.wheel += S.speed * dt;
+    }
+    for (const f of S.flights) {
+      f.t += dt / .42;
+      if (f.t < 1 || f.done) continue;
+      f.done = true;
+      const l = toWheel(f.tx, f.ty);
+      if (hitsLeader(l)) {
+        S.crash = { x: f.tx, y: f.ty, cracks: Array.from({ length: 14 }, () => ({ a: Math.random() * Math.PI * 2, r: 30 + Math.random() * 140, k: Math.random() })) };
+        S.scores[S.turn] = 0; go('crash'); return;
+      }
+      const d = Math.hypot(l.x, l.y);
+      if (d <= CONFIG.radius) { S.planted.push({ l, t: 0 }); S.influence += Math.max(0, Math.round(100 - d)); }
+      else { S.falling.push({ x: f.tx, y: f.ty, v: 0 }); }
+    }
+    S.flights = S.flights.filter(f => !f.done);
+    S.planted.forEach(p => p.t += dt);
+    if (sectors().every(Boolean)) { S.closed[S.turn] = true; S.scores[S.turn] = S.influence + 200; endTurn(); }   // triangle closed: +200
+    else if (S.left === 0 && !S.flights.length && !S.falling.length) { S.scores[S.turn] = S.influence; endTurn(); }
+  }
+
+  /* ---------------- drawing ---------------- */
+  function background(id) {
+    live(id);
+    if (id && Live.isPlaying(id)) {
+      g.clearRect(0, 0, W, H);
+      const hr = clock(id), wx = S.weather[id] || {};
+      if (hr < 6 || hr >= 20) { g.fillStyle = 'rgba(8,12,50,.5)'; g.fillRect(0, 0, W, H); }          // it is night there now
+      else if (hr < 8 || hr >= 17) { g.fillStyle = 'rgba(255,110,60,.18)'; g.fillRect(0, 0, W, H); } // dawn or dusk there now
+      if (wx.rain > 0) { g.fillStyle = 'rgba(190,210,255,.5)'; for (let i = 0; i < 90; i++) g.fillRect((i * 53 + S.t * 30) % W, (i * 31 + S.t * 230) % H, 1, 4); } // it is raining there now
+      return;
+    }
+    const h = clock(id || 'italy'), m = S.weather[id] || { clouds: 30, rain: 0 };
+    const day = h >= 7 && h < 18, dusk = (h >= 17 && h < 20) || (h >= 6 && h < 8);
+    const a = day ? [70, 130, 220] : dusk ? [210, 110, 90] : [12, 16, 48], b = day ? [170, 210, 240] : dusk ? [245, 180, 110] : [40, 32, 80];
+    for (let y = 0; y < H; y += 3) { const k = y / H, d = ((y / 3) % 2) * .04; g.fillStyle = `rgb(${a.map((c, i) => Math.round(c + (b[i] - c) * Math.min(1, k + d))).join(',')})`; g.fillRect(0, y, W, 3); }
+    g.fillStyle = day ? 'rgba(245,245,255,.85)' : 'rgba(90,90,120,.85)';
+    for (let i = 0; i < Math.round(m.clouds / 12); i++) { const x = (i * 83 + S.t * 3) % (W + 80) - 40, y = 14 + (i * 29) % 70; g.fillRect(Math.round(x), y, 40, 9); g.fillRect(Math.round(x) + 10, y - 6, 22, 7); }
+    // generic low-poly city
+    g.fillStyle = day ? '#6d7f8f' : '#1c1a2e';
+    for (let i = 0; i < 18; i++) { const w = 12 + (i * 7) % 14, hh = 20 + (i * 37) % 46; g.fillRect(i * 19 - 4, 196 - hh, w, hh + 30); }
+    g.fillStyle = day ? '#59705a' : '#151a18'; g.fillRect(0, 196, W, 44);
+    if (!day) { g.fillStyle = '#ffd36b'; for (let i = 0; i < 40; i++) g.fillRect((i * 41) % W, 150 + (i * 17) % 44, 2, 2); }
+    if (m.rain > 0) { g.fillStyle = 'rgba(190,210,255,.55)'; for (let i = 0; i < 90; i++) g.fillRect((i * 53 + S.t * 30) % W, (i * 31 + S.t * 230) % H, 1, 4); }
+  }
+
+  function desktop(bgOf) {
+    background(bgOf);
+    // one icon per nation
+    COUNTRIES.forEach((id, i) => {
+      const x = 6, y = 6 + i * 23, cq = S.world.conquests[id], re = (S.world.open || []).includes(id);
+      if (re && Math.floor(S.t * 3) % 2) { g.fillStyle = 'rgba(80,140,255,.6)'; g.fillRect(x - 2, y - 2, 30, 22); }
+      head(id, x + 4, y, 16);
+      flag(g, cq || id, x + 14, y + 10, 14, 9);
+      if (cq) { g.strokeStyle = '#ffe680'; g.lineWidth = 1; g.strokeRect(x + 13.5, y + 9.5, 15, 10); }
+    });
+    taskbar();
+  }
+  function taskbar() {
+    (S.world.cards || []).slice(-9).forEach((c, i) => card(c.kind, c.from, 46 + i * 12, 227, 10, 12, undefined, false, c.open));
+    // phone icon: green when connected, flashes white when a gesture arrives
+    if (S.phone) { S.signal = Math.max(0, (S.signal || 0) - .05); g.fillStyle = S.signal > 0 ? '#ffffff' : '#7dff9a'; g.fillRect(232, 228, 6, 10); g.fillStyle = '#1f4fb8'; g.fillRect(233, 229, 4, 7); }
+    g.fillStyle = '#1f4fb8'; g.fillRect(0, 226, W, 14);
+    g.fillStyle = '#3c7be0'; g.fillRect(0, 226, W, 2);
+    g.fillStyle = '#2f9e3a'; g.fillRect(0, 226, 42, 14); g.fillStyle = '#4ccf58'; g.fillRect(0, 226, 42, 2);
+    if (S.me) flag(g, S.me, 8, 229, 13, 9); else { g.fillStyle = '#fff'; g.fillRect(10, 230, 4, 4); g.fillRect(15, 230, 4, 4); g.fillRect(10, 235, 4, 4); g.fillRect(15, 235, 4, 4); }
+    g.fillStyle = '#1a8fd8'; g.fillRect(W - 70, 226, 70, 14);
+    // tray: speaker + live bars from the real audio (click to mute)
+    g.fillStyle = '#fff'; g.fillRect(W - 66, 231, 2, 4); g.beginPath(); g.moveTo(W - 64, 231); g.lineTo(W - 61, 228); g.lineTo(W - 61, 238); g.lineTo(W - 64, 235); g.fill();
+    if (Music.muted) { g.fillStyle = '#ff5a4a'; g.fillRect(W - 59, 231, 4, 1); g.fillRect(W - 59, 234, 4, 1); }
+    else Music.levels().forEach((v, i) => { const h = 1 + Math.round(v * 9); g.fillStyle = i > 3 ? '#ffe040' : '#7dff9a'; g.fillRect(W - 58 + i * 3, 237 - h, 2, h); });
+    number(clock(S.rival || 'italy', true), W - 20, 236, '#fff');
+  }
+
+  function head(id, x, y, h) {
+    const sp = SPR[id]; if (!sp.ok) return;
+    const k = h * 2.6 / sp.im.height; // top of the sprite only: the head
+    g.save(); g.beginPath(); g.rect(x - 8, y, 16, h); g.clip();
+    g.drawImage(sp.im, x - sp.im.width * k / 2, y, sp.im.width * k, sp.im.height * k); g.restore();
+  }
+
+  function windowFrame(x, y, w, h, flagId) {
+    g.fillStyle = '#0a246a'; g.fillRect(x - 2, y - 2, w + 4, h + 4);
+    g.fillStyle = '#245edb'; g.fillRect(x, y, w, 12); g.fillStyle = '#3a7bf0'; g.fillRect(x, y, w, 3);
+    if (flagId) flag(g, flagId, x + 4, y + 2, 12, 8);
+    g.fillStyle = '#d9472b'; g.fillRect(x + w - 12, y + 2, 9, 8);
+    g.fillStyle = '#fff'; g.fillRect(x + w - 10, y + 4, 1, 1); g.fillRect(x + w - 9, y + 5, 3, 2); g.fillRect(x + w - 6, y + 4, 1, 1); g.fillRect(x + w - 10, y + 7, 1, 1); g.fillRect(x + w - 6, y + 7, 1, 1);
+    g.fillStyle = '#245edb'; g.fillRect(x, y + 12, 2, h - 12); g.fillRect(x + w - 2, y + 12, 2, h - 12); g.fillRect(x, y + h - 2, w, 2);
+  }
+
+  function wheel() {
+    const R = CONFIG.radius + 6;
+    g.save(); g.translate(CX, CY); g.rotate(S.wheel);
+    // concentric white and red rings
+    for (let i = 7; i >= 0; i--) { g.fillStyle = i % 2 ? '#f4efe6' : '#d32626'; g.beginPath(); g.arc(0, 0, R * (i + 1) / 8, 0, Math.PI * 2); g.fill(); }
+    // spokes so the rotation is visible
+    g.fillStyle = 'rgba(0,0,0,.08)';
+    for (let i = 0; i < 12; i += 2) { g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, R, i * Math.PI / 6, (i + 1) * Math.PI / 6); g.fill(); }
+    // rim with bulbs
+    g.strokeStyle = '#c8a14a'; g.lineWidth = 4; g.beginPath(); g.arc(0, 0, R, 0, Math.PI * 2); g.stroke();
+    for (let i = 0; i < 20; i++) { const a = i / 20 * Math.PI * 2; g.fillStyle = (Math.floor(S.t * 5) + i) % 2 ? '#fff3a0' : '#8a6a20'; g.fillRect(Math.round(Math.cos(a) * R) - 1, Math.round(Math.sin(a) * R) - 1, 3, 3); }
+    const sp = SPR[S.rival];
+    // the leader, strapped to the wheel
+    if (sp && sp.ok) { const k = leaderScale(), jx = (Math.random() - .5) * .6; g.drawImage(sp.im, -sp.im.width * k / 2 + jx, -sp.im.height * k / 2, sp.im.width * k, sp.im.height * k); }
+    g.restore();
+    g.fillStyle = '#4a3a20'; g.fillRect(CX - 3, CY + R - 2, 6, 34); // stand
+  }
+
+  function pole(x, y, id, scale, t) {
+    const s = scale || 1;
+    g.fillStyle = '#e8e0c8'; g.fillRect(Math.round(x), Math.round(y - 11 * s), 1, Math.round(12 * s));
+    flag(g, id, x + 1, y - 11 * s + Math.round(Math.sin((t || 0) * 6 + x) * 1), 12 * s, 8 * s);
+  }
+
+  function number(n, x, y, col) { g.fillStyle = col || '#ffe680'; g.font = '8px monospace'; g.textAlign = 'center'; g.fillText(String(n), x, y); }
+
+  // a big PS1-style coin: size follows today's move against gold
+  function coin(x, y, id, r, lit, spin) {
+    const sx = spin === undefined ? 1 : Math.abs(Math.cos(spin)); // flattening while it spins
+    g.save(); g.translate(x, y); g.scale(Math.max(.08, sx), 1);
+    g.fillStyle = lit && Math.floor(S.t * 4) % 2 ? '#fff3a0' : '#c99a2e'; g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#8a6418'; g.beginPath(); g.arc(0, 0, r - 3, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#e8c25a'; g.beginPath(); g.arc(-1, -1, r - 5, 0, Math.PI * 2); g.fill();
+    const c = CURRENCY[id];
+    if (!c) { g.fillStyle = '#000'; g.fillRect(-r + 2, -5, 2 * r - 4, 10); } // censored
+    else { g.fillStyle = '#7a5410'; g.font = `900 ${Math.round(r * 1.1)}px "Arial Black", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(SYMBOL[c], 0, 1); g.textBaseline = 'alphabetic'; }
+    g.restore();
+  }
+
+  function winScreen() {
+    const t = S.t;
+    for (let i = 0; i < 70; i++) {   // confetti
+      const x = (i * 47 + Math.sin(t * 2 + i) * 12) % W, y = ((i * 23) % 240 + t * (40 + i % 5 * 12)) % 260 - 20;
+      g.fillStyle = ['#ff2bd6', '#3ad8ff', '#ffe040', '#7dff9a', '#fff', '#d32626'][i % 6]; g.fillRect(Math.round(x), Math.round(y), 3, 2 + i % 3);
+    }
+    const k = Math.min(1, t * 2), bw = 96 * k, bh = 64 * k, wave = Math.sin(t * 4) * 3;
+    g.fillStyle = 'rgba(10,20,60,.78)'; g.fillRect(40, 22, 240, 182);
+    g.fillStyle = '#fff'; g.fillRect(160 - bw / 2 - 3, 38 - 3 + wave, bw + 6, bh + 6);
+    flag(g, S.me, 160 - bw / 2, 38 + wave, bw, bh);
+    if (t > .6) {
+      g.textAlign = 'center'; g.font = '900 28px Impact, "Arial Black", sans-serif';
+      g.lineWidth = 4; g.strokeStyle = '#0a246a'; g.strokeText(NAME[S.me].toUpperCase(), 160, 136); g.fillStyle = '#fff'; g.fillText(NAME[S.me].toUpperCase(), 160, 136);
+    }
+    if (t > 1) {
+      const p = 1 + Math.sin(t * 6) * .08; g.save(); g.translate(160, 166); g.scale(p, p); g.rotate(-.05);
+      g.font = '900 30px Impact, "Arial Black", sans-serif'; g.lineWidth = 5; g.strokeStyle = '#d32626'; g.strokeText('WINS!', 0, 0); g.fillStyle = '#ffe040'; g.fillText('WINS!', 0, 0); g.restore();
+    }
+    if (t > 1.6) { badge(S.champ, 132, 188); number(countOf(S.champ) + '/9', 168, 191, '#ffe680'); }
+  }
+  function badge(p, x, y) { if (p === null || p === undefined) { g.fillStyle = '#888'; g.fillRect(x - 3, y - 3, 6, 6); return; } g.fillStyle = PCOL[p]; g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.fill(); number(p + 1, x, y + 3, '#0a246a'); }
+  function groupShot(rivalPick, empty) {
+    // PS1-cover group photo: cyan-to-violet gradient, low-poly sofa
+    live(null);
+    for (let y = 0; y < 226; y += 2) { const k = y / 226; g.fillStyle = `rgb(${Math.round(90 + 90 * k)},${Math.round(200 - 120 * k)},${Math.round(230 - 30 * k)})`; g.fillRect(0, y, W, 2); }
+    g.fillStyle = '#7b2f6e'; g.beginPath(); g.moveTo(4, 150); g.lineTo(316, 150); g.lineTo(306, 186); g.lineTo(14, 186); g.fill();
+    g.fillStyle = '#9a3f8a'; g.fillRect(10, 122, 300, 30);
+    COUNTRIES.forEach((id, i) => {
+      const sp = SPR[id], x = 8 + i * 34 + 17, sel = i === S.sel, cq = S.world.conquests[id];
+      const h = sel ? 84 : 70, y = 170 - h + (sel ? Math.round(Math.sin(S.t * 8) * 2) : 0);
+      const dim = S.scene === 'draft' && owner(id) !== null; if (empty) return;
+      if (sel) { g.fillStyle = 'rgba(255,240,140,.5)'; g.fillRect(x - 17, y - 4, 34, h + 8); }
+      if (sp.ok) { const k = h / sp.im.height; g.globalAlpha = dim ? .3 : 1; g.drawImage(sp.im, x - sp.im.width * k / 2, y, sp.im.width * k, h); g.globalAlpha = 1; }
+      flag(g, id, x - 7, 192, 14, 9);
+      if (cq) flag(g, cq, x - 6, y - 12, 12, 8);
+      if (S.scene === 'draft' && owner(id) !== null) badge(owner(id), x, 210);
+    });
+    taskbar();
+  }
+
+  function crash() {
+    if (S.crash && S.t < .7) {
+      // the glass cracks
+      g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 1;
+      S.crash.cracks.forEach(c => { const r = c.r * Math.min(1, S.t * 3); g.beginPath(); g.moveTo(S.crash.x, S.crash.y); g.lineTo(S.crash.x + Math.cos(c.a) * r * .5 + c.k * 6, S.crash.y + Math.sin(c.a) * r * .5); g.lineTo(S.crash.x + Math.cos(c.a) * r, S.crash.y + Math.sin(c.a) * r); g.stroke(); });
+      return;
+    }
+    if (S.t < 1.9) {   // BOOM: white flash, comic burst, shaking letters
+      const t = S.t - .7, sh = Math.max(0, 1 - t) * 6, dx = (Math.random() - .5) * sh, dy = (Math.random() - .5) * sh;
+      g.fillStyle = t < .12 ? '#fff' : '#111'; g.fillRect(0, 0, W, H);
+      if (t >= .12) {
+        g.save(); g.translate(160 + dx, 112 + dy);
+        const k = Math.min(1, (t - .12) * 6), spikes = 14;
+        [['#ffd34a', 1], ['#d32626', .78]].forEach(([col, f]) => { g.fillStyle = col; g.beginPath(); for (let i = 0; i < spikes * 2; i++) { const a = i / (spikes * 2) * Math.PI * 2, r = (i % 2 ? 62 : 110) * f * k; g.lineTo(Math.cos(a) * r * 1.3, Math.sin(a) * r); } g.closePath(); g.fill(); });
+        g.rotate(-.12); g.scale(k, k); g.textAlign = 'center'; g.font = '900 52px Impact, "Arial Black", sans-serif';
+        g.lineWidth = 6; g.strokeStyle = '#111'; g.strokeText('BOOM!', 0, 18); g.fillStyle = '#fff'; g.fillText('BOOM!', 0, 18);
+        g.restore();
+      }
+      return;
+    }
+    // blue screen of the end of the world
+    g.fillStyle = '#0000aa'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#aaaaaa'; g.fillRect(110, 30, 100, 11); g.fillStyle = '#0000aa'; g.textAlign = 'center'; g.font = 'bold 8px monospace'; g.fillText('FATAL ERROR', 160, 38);
+    const k = Math.min(1, (S.t - 1.9) * 4), j = Math.floor(S.t * 20) % 7 === 0 ? 2 : 0;
+    g.font = '900 30px Impact, "Arial Black", sans-serif'; g.fillStyle = '#d32626'; g.globalAlpha = k; g.fillText('WORLD WAR III', 160 + j, 92); g.fillStyle = '#fff'; g.fillText('WORLD WAR III', 160 - j, 90); g.globalAlpha = 1;
+    g.font = '8px monospace'; g.fillStyle = '#fff';
+    if (S.me && S.rival) wrap(`${NAME[S.me]} hit the leader of ${NAME[S.rival]}. The turn is over: 0 points.`, 160, 118, 250, 10);
+    number('0x' + (S.rival || '').length.toString(16).padStart(8, '0').toUpperCase(), 160, 160, '#aaf');
+    if (S.me) flag(g, flagOf(S.me), 130, 176, 27, 18);
+    if (S.rival) flag(g, flagOf(S.rival), 163, 176, 27, 18);
+    if (S.t > 3 && Math.floor(S.t * 2) % 2) { g.fillStyle = '#fff'; g.fillRect(156, 210, 8, 8); }
+  }
+
+  function draw() {
+    const sc = S.scene;
+    if (sc === 'off') {
+      g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+      // power button
+      const on = Math.floor(S.t * 1.5) % 2;
+      g.strokeStyle = on ? '#7dff9a' : '#2a6a3a'; g.lineWidth = 4;
+      g.beginPath(); g.arc(160, 122, 22, -Math.PI / 2 + .6, Math.PI * 1.5 - .6); g.stroke();
+      g.fillStyle = g.strokeStyle; g.fillRect(158, 92, 4, 28);
+      return;
+    }
+    if (sc === 'splash' || sc === 'dial') {
+      g.fillStyle = '#05103a'; g.fillRect(0, 0, W, H);
+      if (sc === 'splash') logo();
+      else {
+        globe();
+        // two computers, packets running between them
+        const pc = x => { g.fillStyle = '#c9cfd8'; g.fillRect(x, 186, 22, 16); g.fillStyle = '#245edb'; g.fillRect(x + 3, 189, 16, 10); g.fillStyle = '#9aa3b2'; g.fillRect(x + 6, 203, 10, 3); };
+        pc(40); pc(258);
+        for (let i = 0; i < 12; i++) if ((Math.floor(S.t * 10) - i) % 4 === 0) { g.fillStyle = '#ffe680'; g.fillRect(70 + i * 15, 194, 4, 3); }
+      }
+      // progress bar made of blocks: real loading + real data
+      const p = sc === 'splash' ? Math.min(1, S.loaded / 10) : Math.min(1, S.dataDone / 10);
+      g.strokeStyle = '#a9c8ff'; g.lineWidth = 1; g.strokeRect(80.5, 216.5, 160, 10);
+      for (let i = 0; i < Math.round(p * 19); i++) { g.fillStyle = '#2f9e3a'; g.fillRect(83 + i * 8, 219, 6, 5); }
+      return;
+    }
+    if (sc === 'rules') {
+      desktop(null);
+      const x = 10, y = 12, w = 300, h = 204; windowFrame(x, y, w, h, null);
+      g.fillStyle = '#fff'; g.font = 'bold 8px monospace'; g.textAlign = 'left'; g.fillText('HOW_TO_PLAY.txt', x + 6, y + 9);
+      g.fillStyle = '#fdfdf6'; g.fillRect(x + 2, y + 12, w - 4, h - 14);
+      g.fillStyle = '#0a246a'; g.font = '900 13px Impact, "Arial Black", sans-serif'; g.fillText('HOW TO PLAY', x + 10, y + 29);
+      const R = [
+        ['people', '2-4 players share out the 9 countries.'],
+        ['phone', 'Scan the QR: your phone becomes your flag.'],
+        ['card', 'A news card decides who fights whom.'],
+        ['coin', 'The strongest currency today throws first.'],
+        ['target', 'Throw 3 flags: the closer to the centre, the more points.'],
+        ['boom', 'Never touch the leader: WORLD WAR III, 0 points.'],
+        ['tri', 'Close the triangle: +200. Best score takes the country.'],
+        ['crown', 'After 5 duels, the most countries wins.'],
+      ];
+      R.forEach(([ic, txt], i) => {
+        const t = S.t - .4 - i * .6; if (t < 0) return;
+        const ly = y + 46 + i * 20, ix = x + 16;
+        if (ic === 'people') PCOL.forEach((c, k) => { g.fillStyle = c; g.fillRect(ix - 7 + k * 4, ly - 7, 3, 3); g.fillRect(ix - 8 + k * 4, ly - 3, 4, 5); });
+        if (ic === 'phone') { g.fillStyle = '#222'; g.fillRect(ix - 4, ly - 8, 8, 13); g.fillStyle = '#ff2bd6'; g.fillRect(ix - 3, ly - 7, 6, 11); }
+        if (ic === 'card') { g.fillStyle = '#d32626'; g.fillRect(ix - 5, ly - 8, 10, 13); g.fillStyle = '#fff'; g.fillRect(ix - 3, ly - 6, 6, 2); g.fillRect(ix - 3, ly - 2, 6, 1); }
+        if (ic === 'coin') coin(ix, ly - 2, 'usa', 6);
+        if (ic === 'target') [7, 5, 3, 1].forEach((r, k) => { g.fillStyle = k % 2 ? '#fff' : '#d32626'; g.beginPath(); g.arc(ix, ly - 2, r, 0, Math.PI * 2); g.fill(); });
+        if (ic === 'boom') { g.fillStyle = '#ffd34a'; g.beginPath(); for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2, r = k % 2 ? 3 : 8; g.lineTo(ix + Math.cos(a) * r, ly - 2 + Math.sin(a) * r); } g.fill(); }
+        if (ic === 'tri') { g.strokeStyle = '#2f9e3a'; g.lineWidth = 2; g.beginPath(); g.moveTo(ix - 6, ly + 3); g.lineTo(ix, ly - 7); g.lineTo(ix + 6, ly + 3); g.closePath(); g.stroke(); }
+        if (ic === 'crown') { g.fillStyle = '#e8b020'; g.beginPath(); g.moveTo(ix - 7, ly + 3); g.lineTo(ix - 7, ly - 6); g.lineTo(ix - 3, ly - 1); g.lineTo(ix, ly - 8); g.lineTo(ix + 3, ly - 1); g.lineTo(ix + 7, ly - 6); g.lineTo(ix + 7, ly + 3); g.fill(); }
+        const shown = txt.slice(0, Math.floor(t * 45));   // typed out
+        g.fillStyle = '#111'; g.font = '7px monospace'; g.textAlign = 'left'; wrap(shown, x + 30, ly + 1, w - 36, 8);
+      });
+      if (S.t > 6 && Math.floor(S.t * 2) % 2) { g.fillStyle = '#0a246a'; g.fillRect(x + w - 22, y + h - 16, 8, 8); }   // ready: throw to start
+      return;
+    }
+    if (sc === 'title') {
+      background(null); taskbar(); // drawn skyline on the title; live squares only in the duels
+      logo();
+      if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#fff'; g.beginPath(); g.moveTo(153, 204); g.lineTo(153, 218); g.lineTo(167, 211); g.fill(); }
+      return;
+    }
+    if (sc === 'pair') {
+      desktop(null); windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, COUNTRIES.find(id => owner(id) === 0));
+      g.fillStyle = 'rgba(10,20,60,.85)'; g.fillRect(WIN.x + 2, WIN.y + 12, WIN.w - 4, WIN.h - 14);
+      // 1. scan the QR (DOM, left)   2. show the pink phone to the webcam (right)
+      g.fillStyle = '#ffe680'; g.font = '900 12px "Arial Black", sans-serif'; g.textAlign = 'center';
+      number(1, 106, 44, '#ffe680'); number(2, 214, 44, '#ffe680');
+      if (Cam.on === true) { camPreview(170, 72, 88, 66); if (Cam.flash > 0) { Cam.flash -= .04; g.fillStyle = `rgba(255,255,255,${Cam.flash})`; g.fillRect(170, 72, 88, 66); } if (!Cam.target && Math.floor(S.t * 2) % 2) { g.fillStyle = '#fff'; g.beginPath(); g.moveTo(250, 128); g.lineTo(250, 138); g.lineTo(253, 135); g.lineTo(256, 139); g.lineTo(257, 138); g.lineTo(254, 134); g.lineTo(258, 134); g.fill(); } }
+      else { g.strokeStyle = '#a9c8ff'; g.strokeRect(170.5, 72.5, 88, 66); g.fillStyle = Cam.denied ? '#ff5a4a' : '#a9c8ff'; g.fillRect(204, 98, 20, 14); g.fillRect(224, 101, 6, 8); }
+      // phone icon held up towards the camera
+      const px = 199, py = 146 + Math.round(Math.sin(S.t * 3) * 2);
+      g.fillStyle = '#222'; g.fillRect(px, py, 30, 52); g.fillStyle = '#ff2bd6'; g.fillRect(px + 2, py + 3, 26, 46);
+      flag(g, COUNTRIES.find(id => owner(id) === 0) || 'italy', px + 4, py + 18, 22, 15);
+      // ticks: 1 = phone connected, 2 = webcam sees it
+      const tick = (x, y, ok) => { g.fillStyle = ok ? '#2f9e3a' : 'rgba(255,255,255,.15)'; g.fillRect(x - 7, y - 7, 14, 14); if (ok) { g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); g.moveTo(x - 4, y); g.lineTo(x - 1, y + 3); g.lineTo(x + 4, y - 3); g.stroke(); } else if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#ffe680'; g.fillRect(x - 1, y - 1, 2, 2); } };
+      tick(124, 41, S.phone); tick(232, 41, S.phone && Cam.seen > 1);
+      // progress: the phone is being seen
+      for (let i = 0; i < 8; i++) { g.fillStyle = i < Cam.seen * 8 ? '#7dff9a' : 'rgba(255,255,255,.2)'; g.fillRect(170 + i * 11, 142, 9, 3); }
+      // solo option: blinking mouse icon (click to play without a phone)
+      if (Math.floor(S.t * 2) % 2) { g.fillStyle = '#fff'; g.fillRect(WIN.x + 10, 196, 10, 14); g.fillStyle = '#1f4fb8'; g.fillRect(WIN.x + 14, 196, 2, 5); }
+      return;
+    }
+    if (sc === 'switch' || sc === 'result') {
+      desktop(S.rival); windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, S.rival);
+      g.fillStyle = 'rgba(10,20,60,.82)'; g.fillRect(WIN.x + 2, WIN.y + 12, WIN.w - 4, WIN.h - 14);
+      const D = S.duelists, two = owner(D[1]) !== null;
+      [0, 1].forEach(i => {
+        const x = i ? 205 : 115, win = sc === 'result' && (two ? S.scores[i] > S.scores[1 - i] : (i === 0) === S.closed[0]);
+        const s = win ? 1 + Math.sin(S.t * 6) * .08 + .2 : 1, w = 48 * s, h = 32 * s;
+        flag(g, flagOf(D[i]), x - w / 2, 70 - h / 2, w, h); badge(owner(D[i]), x, 40);
+        if (!two && i === 1) return;
+        number(sc === 'switch' && i === 1 ? '?' : S.scores[i], x, 112, win ? '#ffe680' : '#fff');
+        if (S.closed[i]) { g.strokeStyle = '#7dff9a'; g.lineWidth = 2; g.beginPath(); g.moveTo(x - 8, 130); g.lineTo(x, 122); g.lineTo(x + 8, 130); g.closePath(); g.stroke(); } // triangle closed
+      });
+      if (sc === 'switch') {   // the phone passes from player 1 to player 2
+        const k = Math.min(1, S.t / 1.5), px = 115 + 90 * (1 - Math.cos(k * Math.PI)) / 2, py = 160 - Math.sin(k * Math.PI) * 18;
+        g.fillStyle = '#222'; g.fillRect(px - 9, py - 15, 18, 30); g.fillStyle = '#ff2bd6'; g.fillRect(px - 7, py - 13, 14, 26); flag(g, flagOf(D[1]), px - 5, py - 4, 10, 7);
+      }
+      return;
+    }
+    if (sc === 'players') {   // pixel people: 2, 3 or 4 players
+      groupShot(false, true);
+      g.fillStyle = 'rgba(10,20,60,.8)'; g.fillRect(30, 50, 260, 150);
+      [2, 3, 4].forEach((n, i) => {
+        const cx = 80 + i * 80, sel = i === S.sel, b = sel ? Math.round(Math.sin(S.t * 8) * 2) : 0;
+        if (sel) { g.fillStyle = 'rgba(255,240,140,.35)'; g.fillRect(cx - 38, 60, 76, 130); }
+        for (let k = 0; k < n; k++) { const x = cx - (n - 1) * 8 + k * 16; g.fillStyle = PCOL[k]; g.fillRect(x - 4, 100 + b, 8, 8); g.fillRect(x - 6, 110 + b, 12, 18); g.fillRect(x - 5, 128 + b, 4, 12); g.fillRect(x + 1, 128 + b, 4, 12); }
+        number(n, cx, 172, sel ? '#ffe680' : '#fff');
+      });
+      return;
+    }
+    if (sc === 'draft') {     // everybody takes countries in turn
+      groupShot(false);
+      g.fillStyle = PCOL[S.picker]; g.fillRect(118, 14, 84, 40); g.fillStyle = '#0a246a'; g.fillRect(120, 16, 80, 36);
+      flag(g, COUNTRIES[S.sel], 146, 22, 36, 24); badge(S.picker, 132, 34);
+      return;
+    }
+    if (sc === 'coins') {
+      desktop(S.rival); windowFrame(WIN.x, WIN.y, WIN.w, WIN.h, S.rival);
+      g.fillStyle = 'rgba(10,20,60,.8)'; g.fillRect(WIN.x + 2, WIN.y + 12, WIN.w - 4, WIN.h - 14);
+      flag(g, S.me, 90, 34, 30, 20); badge(owner(S.me), 105, 62); flag(g, S.rival, 200, 34, 30, 20); badge(owner(S.rival), 215, 62);
+      // two gold bars: each currency piles up coins for how much it grew today against gold; the taller pile goes green and starts
+      const L = [105, 215], ids = [S.me, S.rival], first = S.meFirst ? 0 : 1, done = S.t > 2.4;
+      L.forEach(x => { g.fillStyle = '#ffd34a'; g.beginPath(); g.moveTo(x - 20, 196); g.lineTo(x + 20, 196); g.lineTo(x + 25, 208); g.lineTo(x - 25, 208); g.fill(); g.fillStyle = '#b8901e'; g.fillRect(x - 25, 206, 50, 2); });
+      if (S.toss) {   // same currency (or censored): one coin flipped in the air, it lands on a flag
+        const up = Math.min(1, S.t / 1.6), y = 120 - Math.sin(up * Math.PI) * 50;
+        coin(160, y, S.me, 24, false, up < 1 ? S.t * 18 : 0);
+        if (up >= 1) { const x = L[first]; g.fillStyle = '#3fd46b'; g.fillRect(x - 17, 158, 34, 24); flag(g, ids[first], x - 15, 160 + Math.round(Math.sin(S.t * 8)), 30, 20); }
+      } else {
+        const v = ids.map(strength), n = v.map(k => Math.max(1, Math.min(13, Math.round(5 + k * 10))));   // +0.40% ≈ 9 coins, −0.30% ≈ 2
+        L.forEach((x, i) => {
+          const shown = Math.min(n[i], Math.floor(S.t / .14)), col = !done ? null : i === first ? ['#3fd46b', '#1e8a3c'] : ['#e04040', '#8a1e1e'];
+          for (let k = 0; k < shown; k++) {
+            const y = 192 - k * 7, j = k === shown - 1 && shown < n[i] ? -3 : 0;   // the newest coin drops in
+            g.fillStyle = col ? col[1] : '#8a6418'; g.beginPath(); g.ellipse(x, y + 2 + j, 16, 4, 0, 0, Math.PI * 2); g.fill();
+            g.fillStyle = col ? col[0] : '#e8c25a'; g.beginPath(); g.ellipse(x, y + j, 16, 4, 0, 0, Math.PI * 2); g.fill();
+          }
+          const top = 192 - (shown - 1) * 7;
+          if (shown) { g.fillStyle = col ? col[1] : '#7a5410'; g.font = '900 7px "Arial Black", sans-serif'; g.textAlign = 'center'; g.fillText(SYMBOL[CURRENCY[ids[i]]], x, top + 3); }
+          if (done) number((v[i] >= 0 ? '+' : '') + v[i].toFixed(2) + '%', x, top - 8, i === first ? '#7dff9a' : '#ff8080');
+          if (done && i === first) { const b = Math.round(Math.sin(S.t * 8) * 2); flag(g, ids[i], x - 12, top - 36 + b, 24, 16); }
+        });
+      }
+      return;
+    }
+    if (sc === 'duel' || (sc === 'crash' && S.crash && S.t < .7)) {
+      background(S.rival);   // duel: the city video full screen, only the target on top
+      wheel();
+      S.planted.forEach(p => { const s = toScreen(p.l); pole(s.x, s.y, flagOf(S.me), 1, p.t); });
+      S.flights.forEach(f => { const t = Math.min(1, f.t), x = CX + (f.tx - CX) * t, y = 250 + (f.ty - 250) * t - Math.sin(t * Math.PI) * 40; pole(x, y, flagOf(S.me), 2.2 - t * 1.2, S.t); });
+      (S.falling || []).forEach(p => { p.v += .25; p.y += p.v; pole(p.x, p.y, flagOf(S.me), 1, S.t); });
+      S.falling = (S.falling || []).filter(p => p.y < 240);
+      if (sc === 'duel' && Cam.found) S.aim = camAim(Cam.x, Cam.y);
+      if (sc === 'duel') camPreview(W - 54, 6, 48, 36);
+      if (sc === 'duel' && S.aim) { const a = S.aim, r = 7 + Math.sin(S.t * 10); g.strokeStyle = '#ff2bd6'; g.lineWidth = 2; g.beginPath(); g.arc(a.x, a.y, r, 0, Math.PI * 2); g.stroke(); g.fillStyle = '#ff2bd6'; g.fillRect(a.x - 1, a.y - r - 4, 2, 4); g.fillRect(a.x - 1, a.y + r, 2, 4); g.fillRect(a.x - r - 4, a.y - 1, 4, 2); g.fillRect(a.x + r, a.y - 1, 4, 2); }
+      if (sc === 'duel') hud(); else crash();
+      return;
+    }
+    if (sc === 'crash') { crash(); return; }
+    if (sc === 'win') {
+      desktop(S.scenario.a);
+      const s = Math.min(1, S.t * 1.5), fade = S.last ? Math.max(0, 1 - Math.max(0, S.t - 1) * 2) : 0;
+      g.globalAlpha = fade; if (S.last) flag(g, flagOf(S.last), 160 - 60 * s, 118 - 40 * s, 120 * s, 80 * s); g.globalAlpha = 1;
+      for (let i = 0; i < CONFIG.duels; i++) { g.fillStyle = i < S.duels ? '#ffe680' : 'rgba(255,255,255,.3)'; g.beginPath(); g.arc(160 - (CONFIG.duels - 1) * 6 + i * 12, 14, 3, 0, Math.PI * 2); g.fill(); }
+      const st = S.last ? .9 : 0;
+      if (S.t > st) {
+        const c = S.scenario, kind = c.kind, t = S.t - st;
+        let open = c.open; if (c.rule === 'roulette' || kind === 'roulette') { if (t < 2.2) open = [COUNTRIES[Math.floor(S.t * 12) % 9]]; }
+        if (t < 1) card(kind, c.from, 120, 50, 80, 112, Math.cos((1 - t) * Math.PI), false, [c.b]);
+        else { card(kind, c.from, 120, 50 + Math.round(Math.sin(t * 6) * 2), 80, 112, undefined, false, kind === 'roulette' && t < 2.2 ? open : [c.b]);
+          if (t > 1.2) {   // the news strip: why these two fight
+            const [title, line] = headline(c), k = Math.min(1, (t - 1.2) * 3);
+            g.fillStyle = 'rgba(10,20,60,.9)'; g.fillRect(10, 168, 300 * k, 54); g.fillStyle = '#d32626'; g.fillRect(10, 168, 300 * k, 13);
+            if (k >= 1) { g.textAlign = 'left'; g.fillStyle = '#fff'; g.font = 'bold 9px monospace'; g.fillText(title, 15, 178); g.fillStyle = '#ffe680'; g.font = '8px monospace'; wrap(line, 15, 192, 290, 10); }
+          }
+          if (t > 1.6) { flag(g, flagOf(c.a), 62, 92, 42, 28); badge(owner(c.a), 83, 132); flag(g, flagOf(c.b), 216, 92, 42, 28); badge(owner(c.b), 237, 132); } }  // the next duel
+      }
+      return;
+    }
+    if (sc === 'ending') { live(null); for (let y = 0; y < 226; y += 20) for (let x = 0; x < W; x += 30) flag(g, S.me, x + ((y / 20) % 2) * 15 - 15, y, 28, 18); taskbar(); winScreen(); }
+  }
+
+  // wireframe globe, rotating, with a flag on each capital (real latitude and longitude)
+  function globe() {
+    const R = 86, cx = 160, cy = 120, rot = S.t * .35, tilt = .35;
+    const proj = (lat, lon) => {
+      const la = lat * Math.PI / 180, lo = lon * Math.PI / 180 + rot;
+      let x = Math.cos(la) * Math.sin(lo), y = Math.sin(la), z = Math.cos(la) * Math.cos(lo);
+      const y2 = y * Math.cos(tilt) - z * Math.sin(tilt), z2 = y * Math.sin(tilt) + z * Math.cos(tilt);
+      return { x: cx + x * R, y: cy - y2 * R, front: z2 > 0 };
+    };
+    const grad = g.createRadialGradient(cx - 30, cy - 30, 10, cx, cy, R);
+    grad.addColorStop(0, '#7fd0ff'); grad.addColorStop(.6, '#1f5fd0'); grad.addColorStop(1, '#0a246a');
+    g.fillStyle = grad; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = 'rgba(160,230,255,.55)'; g.lineWidth = 1;
+    for (let lon = 0; lon < 360; lon += 20) { g.beginPath(); let on = false; for (let lat = -90; lat <= 90; lat += 6) { const p = proj(lat, lon); if (p.front) { on ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y); on = true; } else on = false; } g.stroke(); }
+    for (let lat = -60; lat <= 60; lat += 20) { g.beginPath(); let on = false; for (let lon = 0; lon <= 360; lon += 6) { const p = proj(lat, lon); if (p.front) { on ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y); on = true; } else on = false; } g.stroke(); }
+    COUNTRIES.forEach(id => { const n = NATIONS[id], p = proj(n.lat, n.lon); if (p.front) pole(p.x, p.y, S.world.conquests[id] || id, 1.1, S.t); });
+    g.strokeStyle = '#0a246a'; g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.stroke();
+  }
+
+  // the only words in the game: its title
+  function logo() {
+    const lines = ['THE GREAT', 'THROW'], sizes = [26, 42], ys = [64, 108];
+    lines.forEach((t, i) => {
+      g.font = `900 ${sizes[i]}px "Arial Black", Impact, sans-serif`; g.textAlign = 'center';
+      const y = ys[i] + Math.round(Math.sin(S.t * 2 + i) * 1.5);
+      g.fillStyle = '#0a246a'; g.fillText(t, 163, y + 4);
+      g.lineWidth = 5; g.strokeStyle = '#0a246a'; g.strokeText(t, 160, y);
+      const grad = g.createLinearGradient(0, y - sizes[i] * .8, 0, y);
+      grad.addColorStop(0, '#ffffff'); grad.addColorStop(.45, '#a9c8ff'); grad.addColorStop(.52, '#2f5fd0'); grad.addColorStop(1, '#e8f0ff');
+      g.fillStyle = grad; g.fillText(t, 160, y);
+    });
+    for (let i = 0; i < 16; i++) { g.fillStyle = i % 2 ? '#f4efe6' : '#d32626'; g.fillRect(64 + i * 12, 118, 12, 6); }
+  }
+
+  function hud() {
+    const pill = (x, y, w, h) => { g.fillStyle = 'rgba(0,0,0,.45)'; g.fillRect(x, y, w, h); };
+    if (S.me) { pill(6, 6, 46, 20); flag(g, flagOf(S.me), 10, 9, 21, 14); badge(owner(S.me), 42, 16); }      // who is throwing
+    if (Cam.on === true) {   // throw power: fill it to the top and the flag goes
+      const px = W - 12, py = 60, ph = 90, f = Math.min(1, Cam.power);
+      g.fillStyle = 'rgba(0,0,0,.5)'; g.fillRect(px - 4, py, 8, ph);
+      g.fillStyle = f >= 1 ? '#ffffff' : f > .7 ? '#ffe040' : '#7dff9a'; g.fillRect(px - 3, py + ph - f * ph, 6, f * ph);
+      g.fillStyle = '#ff2bd6'; g.fillRect(px - 5, py, 10, 2);
+    }
+    if (S.sensShow > 0) { S.sensShow -= .02; number(CONFIG.flickSpeed.toFixed(2), W - 30, 52, '#fff'); }
+    // flags left (bottom left) and points (bottom right)
+    pill(6, H - 20, 50, 14);
+    for (let i = 0; i < CONFIG.flags; i++) { if (i < S.left) flag(g, flagOf(S.me), 9 + i * 15, H - 17, 12, 8); else { g.fillStyle = 'rgba(255,255,255,.2)'; g.fillRect(9 + i * 15, H - 17, 12, 8); } }
+    pill(W - 40, H - 20, 34, 14); number(S.influence, W - 23, H - 10);
+    // ring sectors
+    sectors().forEach((ok, i) => {
+      const a0 = i / CONFIG.sectors * Math.PI * 2 + S.wheel, a1 = (i + 1) / CONFIG.sectors * Math.PI * 2 + S.wheel;
+      g.strokeStyle = ok ? 'rgba(255,230,90,.95)' : 'rgba(255,255,255,.25)'; g.lineWidth = 3;
+      g.beginPath(); g.arc(CX, CY, CONFIG.radius + 14, a0 + .06, a1 - .06); g.stroke();
+    });
+  }
+
+  let prev = performance.now();
+  (function loop(now) { const dt = Math.min(.05, ((now || prev) - prev) / 1000); prev = now || prev; update(dt); draw(); requestAnimationFrame(loop); })();
+}
+
+/* ============================================================
+   PHONE · CONTROLLER
+   ============================================================ */
+function startPhone() {
+  document.getElementById('stage').style.display = 'none';
+  const pad = document.getElementById('pad'); pad.style.display = 'block';
+  const cv = document.getElementById('padc'), g = cv.getContext('2d');
+  let conn = null, connected = false, start = null, country = 0, trail = 0;
+  const id = new URLSearchParams(location.search).get('id'), fromLink = new URLSearchParams(location.search).get('flag');
+  if (COUNTRIES.includes(fromLink)) country = COUNTRIES.indexOf(fromLink);
+  function size() { cv.width = Math.round(innerWidth * (devicePixelRatio || 1)); cv.height = Math.round(innerHeight * (devicePixelRatio || 1)); g.imageSmoothingEnabled = false; }
+  size(); addEventListener('resize', size);
+  try { const peer = new Peer(); peer.on('open', () => { conn = peer.connect('greatthrow-' + id); conn.on('open', () => connected = true); conn.on('close', () => connected = false); conn.on('data', d => { if (d.type === 'flag' && COUNTRIES.includes(d.id)) country = COUNTRIES.indexOf(d.id); }); }); } catch (e) {}
+  const send = d => { if (conn && connected) conn.send(d); };
+  // touchpad: finger down/move = aim (shown on the laptop), finger up = throw
+  let last = 0, pos = null;
+  const rel = e => ({ x: Math.max(0, Math.min(1, e.clientX / innerWidth)), y: Math.max(0, Math.min(1, e.clientY / innerHeight)) });
+  const aim = e => { pos = rel(e); const now = performance.now(); if (now - last > 40) { last = now; send({ type: 'aim', ...pos }); } };
+  const release = e => { if (!pos) return; if (e && e.clientX !== undefined) pos = rel(e); send({ type: 'throw', ...pos }); pos = null; trail = 1; };
+  cv.addEventListener('pointerdown', e => { e.preventDefault(); aim(e); });
+  cv.addEventListener('pointermove', e => { if (pos) { e.preventDefault(); aim(e); } });
+  cv.addEventListener('pointerup', e => { e.preventDefault(); release(e); });
+  cv.addEventListener('pointercancel', () => release());
+  ['touchstart', 'touchmove'].forEach(t => cv.addEventListener(t, e => e.preventDefault(), { passive: false })); // the page never scrolls
+  (function draw() {
+    const W = cv.width, H = cv.height;
+    // pink screen (what the webcam tracks) with the flag in its real proportions, centred
+    g.fillStyle = trail > 0 ? '#ffffff' : '#ff2bd6'; g.fillRect(0, 0, W, H);
+    const RATIO = { germany: 5 / 3, usa: 1.9, northkorea: 2 }, ratio = RATIO[COUNTRIES[country]] || 1.5;
+    const fw = Math.round(W * .8), fh = Math.round(fw / ratio), fx = Math.round((W - fw) / 2), fy = Math.round((H - fh) / 2);
+    g.fillStyle = '#000'; g.fillRect(fx - 3, fy - 3, fw + 6, fh + 6);
+    flag(g, COUNTRIES[country], fx, fy, fw, fh);
+    const dot = Math.round(W * .03); g.fillStyle = connected ? '#3c3' : '#c33'; g.fillRect(W - dot * 2, dot, dot, dot);
+    trail = Math.max(0, trail - .08);
+    requestAnimationFrame(draw);
+  })();
+}
+
+</script>
+</body>
+</html>

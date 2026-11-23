@@ -67,6 +67,22 @@ Vibe Coding final project (Elisava MAIAD 26/27). One entry per version: what I w
 
 **Messages used:** to fill in.
 
+## v7 · 2026-11-23
+**Wanted:** the game must explain itself to people who see it for the first time, the phone pairing must not run away, the coin toss must be readable, every country must have its city behind, and the match needs a real ending.
+
+**Decisions (and why):**
+- **How to Play screen after the title**, as a Notepad window (`HOW_TO_PLAY.txt`) with lines typed one by one and an icon each. The audience at the presentation has never seen the game; the key rule is spelled out: the closer to the centre, the more points, but never touch the leader.
+- **Phone pairing waits for two green ticks:** 1 = phone connected, 2 = webcam sees it. Before, anything pink or a throw gesture skipped the screen before the phone was ready. Mouse icon or Enter = play without a phone (plan B).
+- **Coins pile up on gold bars:** each currency stacks coins for how much it grew today against gold (today vs yesterday). The taller pile turns green and throws first, the other red. Same currency (the euro countries) or a censored coin (North Korea) = a coin flipped in the air. The rule was turned around: before, the weaker coin had the advantage, which nobody understood.
+- **Videos checked one by one in a real browser:** most backup files did not exist and the USA backup was 8K. Now each city has two tested files (480p and a light 240p); a video that does not start within 8 s is skipped.
+- **Riyadh gets a video from YouTube:** the only Riyadh videos on Commons are White House footage with real politicians, against the no-faces rule. An aerial drone video with no people, embedded muted; the channel title and automatic captions are cropped out.
+- **Final screen:** the winner's flag, the country's name and WINS! with confetti, then back to the title.
+- **Text rule updated:** English text also on the How to Play and WINS! screens.
+
+**Known limits:** very old iPhones (before iOS 17.4) cannot play the Wikimedia videos, the drawn city shows instead; the YouTube video depends on the channel keeping it online; world map after each duel still to do.
+
+**Messages used:** to fill in.
+
 ## Dependency map
 | Service | What for | Owned by |
 | --- | --- | --- |
