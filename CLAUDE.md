@@ -10,7 +10,7 @@ Lorenzo — fashion editor and creative director, not a developer. Explain chang
 HTML, CSS, JS in a single `index.html`. No build step. GitHub Pages.
 
 ## Rules
-- Text in the game only in English, and only on: the How to Play screen, the scenario cards (headline explaining the duel), the leader-hit screen and the final WINS! screen; everything else: icons, flags, colours, numbers.
+- Text in the game only in English, and only on: the How to Play screen, the scenario cards (headline explaining the duel), the leader-hit screen, the battle result and the final WINS! screen; everything else: icons, flags, colours, numbers.
 - Characters are named after nations, never people; no words put in politicians' mouths.
 - Soundtrack: `audio/soundtrack.mp3`, played with Web Audio (real visualiser, tape-stop on crash). Lorenzo chose to host the file in the repo knowing it is public.
 - No API keys or personal data in the repository.

@@ -925,6 +925,19 @@ function startTarget() {
         const k = Math.min(1, S.t / 1.5), px = 115 + 90 * (1 - Math.cos(k * Math.PI)) / 2, py = 160 - Math.sin(k * Math.PI) * 18;
         g.fillStyle = '#222'; g.fillRect(px - 9, py - 15, 18, 30); g.fillStyle = '#ff2bd6'; g.fillRect(px - 7, py - 13, 14, 26); flag(g, flagOf(D[1]), px - 5, py - 4, 10, 7);
       }
+      if (sc === 'result' && S.t > .8) {   // who won the battle, in words
+        const [a, b] = D, tie = two && S.scores[0] === S.scores[1];
+        const win = two ? (S.scores[0] > S.scores[1] ? a : b) : (S.closed[0] ? a : null), lose = win === a ? b : a;
+        const big = tie ? 'DRAW' : win ? NAME[win].toUpperCase() + ' WINS' : NAME[b].toUpperCase() + ' RESISTS';
+        const small = tie ? 'Same score. The battle starts again.' : win ? NAME[lose] + ' now flies the flag of ' + NAME[win] + '.' : 'The triangle was not closed. Nothing changes.';
+        const k = Math.min(1, (S.t - .8) * 4);
+        g.fillStyle = tie ? '#888' : win ? '#d32626' : '#245edb'; g.fillRect(WIN.x + 6, 150, (WIN.w - 12) * k, 46);
+        if (k >= 1) {
+          g.textAlign = 'center'; g.font = '900 20px Impact, "Arial Black", sans-serif'; g.lineWidth = 3; g.strokeStyle = '#0a246a';
+          g.strokeText(big, 160, 172); g.fillStyle = '#ffe040'; g.fillText(big, 160, 172);
+          g.fillStyle = '#fff'; g.font = '8px monospace'; g.fillText(small, 160, 188);
+        }
+      }
       return;
     }
     if (sc === 'players') {   // pixel people: 2, 3 or 4 players
