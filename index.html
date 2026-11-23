@@ -299,12 +299,13 @@ function startTarget() {
           throwFlag(ax, ay); S.aim = null;
         }
       });
-      conn.on('close', () => { S.phone = false; S.conn = null; updateQR(); });
+      conn.on('close', () => { if (S.conn !== conn) return; S.phone = false; S.conn = null; updateQR(); });
     });
   } catch (e) { console.warn('PeerJS unavailable: single-player mode'); }
+  const BUILD = Date.now().toString(36);
   function sendFlag() { try { if (S.conn && S.phone && S.me) S.conn.send({ type: 'flag', id: S.world.conquests[S.me] || S.me, player: owner(S.me) }); } catch (e) {} }
   function makeQR() {
-    const b = document.getElementById('qr'), url = location.origin + location.pathname + '?role=phone&flag=' + (S.me || COUNTRIES.find(id => owner(id) === 0) || 'italy') + '&p=' + ((S.me && owner(S.me) !== null ? owner(S.me) : 0) + 1) + '&id=' + code;
+    const b = document.getElementById('qr'), url = location.origin + location.pathname + '?role=phone&flag=' + (S.me || COUNTRIES.find(id => owner(id) === 0) || 'italy') + '&p=' + ((S.me && owner(S.me) !== null ? owner(S.me) : 0) + 1) + '&id=' + code + '&v=' + BUILD;
     if (b.dataset.url === url || typeof qrcode === 'undefined') return;
     const qr = qrcode(0, 'M'); qr.addData(url); qr.make(); b.innerHTML = qr.createImgTag(4, 0); b.dataset.url = url; console.log('Phone:', url);
   }
@@ -623,6 +624,7 @@ function startTarget() {
     const sc = S.scene, prog = S.loaded / 10;
     if (sc === 'splash' && ((S.t > 2.2 && prog >= 1) || S.t > 6)) { Modem.play(); go('dial'); }
     else if (sc === 'dial' && ((S.t > 3 && S.dataDone >= 10) || S.t > 7)) { Modem.stop(); Music.start(); go('title'); }
+    S.resend = (S.resend || 0) + dt; if (S.resend > 1.2) { S.resend = 0; sendFlag(); }
     const AUTO = { rules: 25, ending: 15, coins: 4.5, crash: 5, switch: 3.5, result: 3.5, win: 7 };   // the card stays long enough to read it          // nobody has to touch the laptop
     if (AUTO[S.scene] && S.t > AUTO[S.scene]) press();
     if (S.scene === 'draft' && Cam.found) {                                         // choose by pointing the phone
@@ -1149,7 +1151,16 @@ function startPhone() {
   if (COUNTRIES.includes(fromLink)) country = COUNTRIES.indexOf(fromLink);
   function size() { cv.width = Math.round(innerWidth * (devicePixelRatio || 1)); cv.height = Math.round(innerHeight * (devicePixelRatio || 1)); g.imageSmoothingEnabled = false; }
   size(); addEventListener('resize', size);
-  try { const peer = new Peer(); peer.on('open', () => { conn = peer.connect('greatthrow-' + id); conn.on('open', () => connected = true); conn.on('close', () => connected = false); conn.on('data', d => { if (d.type === 'flag') { if (COUNTRIES.includes(d.id)) country = COUNTRIES.indexOf(d.id); if (d.player !== null && d.player !== undefined && d.player + 1 !== player) { player = d.player + 1; pop = 1; } } }); }); } catch (e) {}
+  const onData = d => { if (d.type === 'flag') { if (COUNTRIES.includes(d.id)) country = COUNTRIES.indexOf(d.id); if (d.player !== null && d.player !== undefined && d.player + 1 !== player) { player = d.player + 1; pop = 1; } } };
+  let peer = null;
+  function link() {   // connect to the laptop; try again every 3 s whenever the link is down
+    try {
+      if (!peer || peer.destroyed || peer.disconnected) { if (peer) peer.destroy(); peer = new Peer(); peer.on('open', open); }
+      else open();
+    } catch (e) {}
+  }
+  function open() { conn = peer.connect('greatthrow-' + id); conn.on('open', () => connected = true); conn.on('close', () => connected = false); conn.on('error', () => connected = false); conn.on('data', onData); }
+  link(); setInterval(() => { if (!connected) link(); }, 3000);
   const send = d => { if (conn && connected) conn.send(d); };
   // touchpad: finger down/move = aim (shown on the laptop), finger up = throw
   let last = 0, pos = null;
